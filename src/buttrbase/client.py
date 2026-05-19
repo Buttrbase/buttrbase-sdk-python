@@ -6,7 +6,17 @@ from typing import Any, Optional
 import requests
 
 from .errors import ButtrbaseError
-from .types import Credential, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse
+from .types import (
+    Credential,
+    CreateCredentialResponse,
+    RotateSecretResponse,
+    SandboxResetResponse,
+    InviteAcceptResponse,
+    OrgCheckResponse,
+    SuperuserResponse,
+    ContactSubmitResponse,
+    GeoResponse,
+)
 
 DEFAULT_BASE_URL = "https://stagingapi.buttrbase.com"
 
@@ -321,6 +331,103 @@ class ButtrbaseClient:
             ``client_id``, and the new ``client_secret``.
         """
         return self._request("POST", f"/credentials/{credential_id}/rotate-secret")
+
+    # ----- Invite-based registration -----
+    def invite_accept(
+        self,
+        token: str,
+        first_name: str,
+        last_name: str,
+        username: str,
+        password: str,
+        phone: Optional[str] = None,
+    ) -> InviteAcceptResponse:
+        """POST /api/auth/invite/accept — accept an invitation and create a user account.
+
+        No authentication required; the ``token`` argument acts as the credential.
+
+        Returns:
+            An ``InviteAcceptResponse`` dict containing ``user_uuid``, ``org_uuid``,
+            ``role``, ``access_token``, ``refresh_token``, ``token_type``,
+            ``expires_in``, and ``message``.
+        """
+        payload: dict = {
+            "token": token,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "password": password,
+        }
+        if phone is not None:
+            payload["phone"] = phone
+        return self._request("POST", "/api/auth/invite/accept", json=payload, auth=False)
+
+    def check_org_name(self, name: str) -> OrgCheckResponse:
+        """GET /api/auth/orgs/check — check whether an organisation name is available.
+
+        Returns:
+            An ``OrgCheckResponse`` dict with ``name`` and ``available``.
+        """
+        return self._request(
+            "GET", "/api/auth/orgs/check", params={"name": name}, auth=False
+        )
+
+    def get_superuser_flag(self, email: str) -> SuperuserResponse:
+        """GET /api/auth/superuser — look up the superuser flag for an email address.
+
+        Requires platform-admin authentication.
+
+        Returns:
+            A ``SuperuserResponse`` dict with ``email`` and ``is_superuser``.
+        """
+        return self._request("GET", "/api/auth/superuser", params={"email": email})
+
+    # ----- Contact forms -----
+    def post_contact(
+        self,
+        name: str,
+        email: str,
+        message: str,
+        company: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact — submit an account / sales enquiry form.
+
+        Returns:
+            A ``ContactSubmitResponse`` dict with ``message`` and ``reference_id``.
+        """
+        payload: dict = {"name": name, "email": email, "message": message}
+        if company is not None:
+            payload["company"] = company
+        if app_id is not None:
+            payload["app_id"] = app_id
+        return self._request("POST", "/api/contact", json=payload, auth=False)
+
+    def post_contact_us(
+        self,
+        name: str,
+        email: str,
+        subject: str,
+        message: str,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact-us — submit a general contact-us form.
+
+        Returns:
+            A ``ContactSubmitResponse`` dict with ``message`` and ``reference_id``.
+        """
+        payload = {"name": name, "email": email, "subject": subject, "message": message}
+        return self._request("POST", "/api/contact-us", json=payload, auth=False)
+
+    # ----- Geo / IP -----
+    def get_client_ip(self) -> GeoResponse:
+        """GET /api/geo/ip — return the caller's IP address and basic geo context.
+
+        Useful during registration for timezone / country pre-fill.
+
+        Returns:
+            A ``GeoResponse`` dict with ``ip``, ``country``, and ``timezone``.
+        """
+        return self._request("GET", "/api/geo/ip", auth=False)
 
     # ----- Sandbox -----
     def reset_sandbox(self, org_uuid: Optional[str] = None) -> SandboxResetResponse:

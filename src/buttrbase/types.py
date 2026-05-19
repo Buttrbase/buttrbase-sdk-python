@@ -47,3 +47,51 @@ class SandboxResetResponse(TypedDict):
     """Response from POST /api/sandbox/reset."""
 
     status: str
+
+
+# ----- Invite-based registration -----
+
+class InviteAcceptResponse(TypedDict):
+    """Response from POST /api/auth/invite/accept."""
+
+    user_uuid: str
+    org_uuid: str
+    role: str
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: int
+    message: str
+
+
+class OrgCheckResponse(TypedDict):
+    """Response from GET /api/auth/orgs/check."""
+
+    name: str
+    available: bool
+
+
+class SuperuserResponse(TypedDict):
+    """Response from GET /api/auth/superuser."""
+
+    email: str
+    is_superuser: bool
+
+
+# ----- Contact forms -----
+
+class ContactSubmitResponse(TypedDict):
+    """Response from POST /api/contact and POST /api/contact-us."""
+
+    message: str
+    reference_id: str
+
+
+# ----- Geo / IP -----
+
+class GeoResponse(TypedDict):
+    """Response from GET /api/geo/ip."""
+
+    ip: str
+    country: str
+    timezone: str
