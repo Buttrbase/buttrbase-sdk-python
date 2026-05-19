@@ -6,7 +6,17 @@ from typing import Any, Optional
 import requests
 
 from .errors import ButtrbaseError
-from .types import Credential, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse
+from .types import (
+    Credential,
+    CreateCredentialResponse,
+    RotateSecretResponse,
+    SandboxResetResponse,
+    InviteAcceptResponse,
+    OrgCheckResponse,
+    SuperuserResponse,
+    ContactSubmitResponse,
+    GeoResponse,
+)
 
 DEFAULT_BASE_URL = "https://stagingapi.buttrbase.com"
 
@@ -165,13 +175,7 @@ class ButtrbaseClient:
 
     # ----- Step-up auth -----
     def auth_step_up(self, code: str, recovery: bool = False) -> dict:
-        """POST /api/auth/step-up.
-
-        Exchange an MFA TOTP (or recovery) code for a short-lived
-        elevated access token (~5 min). On success the SDK's bearer
-        token is REPLACED with the returned ``access_token`` so the
-        next admin / JIT call carries the elevated session.
-        """
+        """POST /api/auth/step-up."""
         payload = {"code": code, "recovery": recovery}
         body = self._request("POST", "/api/auth/step-up", json=payload)
         if isinstance(body, dict) and body.get("access_token"):
@@ -179,7 +183,6 @@ class ButtrbaseClient:
         return body
 
     # ----- JIT elevation (admin) -----
-    # All elevation endpoints require an active step-up session.
     def elevation_request(
         self,
         org_uuid: str,
@@ -187,7 +190,7 @@ class ButtrbaseClient:
         reason: Optional[str] = None,
         ttl_seconds: Optional[int] = None,
     ) -> dict:
-        """POST /api/admin/orgs/{org_uuid}/elevation/request — returns a grant view."""
+        """POST /api/admin/orgs/{org_uuid}/elevation/request."""
         payload: dict = {"scope": scope}
         if reason is not None:
             payload["reason"] = reason
@@ -198,17 +201,14 @@ class ButtrbaseClient:
         )
 
     def elevation_approve(self, org_uuid: str, grant_uuid: str) -> dict:
-        """POST /api/admin/orgs/{org_uuid}/elevation/{grant_uuid}/approve.
-
-        Server returns 403 if the approver is the same admin as the requester.
-        """
+        """POST /api/admin/orgs/{org_uuid}/elevation/{grant_uuid}/approve."""
         return self._request(
             "POST",
             f"/api/admin/orgs/{org_uuid}/elevation/{grant_uuid}/approve",
         )
 
     def elevation_list(self, org_uuid: str, status: Optional[str] = None) -> list:
-        """GET /api/admin/orgs/{org_uuid}/elevation — list grant views."""
+        """GET /api/admin/orgs/{org_uuid}/elevation."""
         params: dict = {}
         if status is not None:
             params["status"] = status
@@ -225,7 +225,7 @@ class ButtrbaseClient:
         workload_path: str,
         ttl_seconds: Optional[int] = None,
     ) -> dict:
-        """POST /api/admin/orgs/{org_uuid}/spiffe/svid — issue an X.509 SVID."""
+        """POST /api/admin/orgs/{org_uuid}/spiffe/svid."""
         payload: dict = {"workload_path": workload_path}
         if ttl_seconds is not None:
             payload["ttl_seconds"] = ttl_seconds
@@ -269,7 +269,7 @@ class ButtrbaseClient:
 
     # ----- Sessions -----
     def revoke_session(self, jti: str, ttl_seconds: Optional[int] = None) -> dict:
-        """POST /api/admin/sessions/revoke — add ``jti`` to the revocation list."""
+        """POST /api/admin/sessions/revoke."""
         payload: dict = {"jti": jti}
         if ttl_seconds is not None:
             payload["ttl_seconds"] = ttl_seconds
@@ -282,58 +282,31 @@ class ButtrbaseClient:
 
     # ----- Credentials -----
     def list_credentials(self) -> dict:
-        """GET /credentials — returns ``{"data": [Credential, ...]}``."""
+        """GET /credentials."""
         return self._request("GET", "/credentials")
 
     def create_credential(self, name: str, description: Optional[str] = None) -> CreateCredentialResponse:
-        """POST /credentials — create a new credential (returns HTTP 201).
-
-        Args:
-            name: Human-readable name for the credential.
-            description: Optional description for the credential.
-
-        Returns:
-            A ``CreateCredentialResponse`` dict containing ``credentials_id``,
-            ``client_id``, ``client_secret``, ``name``, ``description``, and
-            ``created_at``.
-        """
+        """POST /credentials."""
         payload: dict = {"name": name}
         if description is not None:
             payload["description"] = description
         return self._request("POST", "/credentials", json=payload)
 
     def get_credential(self, credential_id: str) -> Credential:
-        """GET /credentials/{credential_id} — fetch a single credential.
-
-        Note: the response does **not** include ``client_secret``.
-        """
+        """GET /credentials/{credential_id}."""
         return self._request("GET", f"/credentials/{credential_id}")
 
     def delete_credential(self, credential_id: str) -> None:
-        """DELETE /credentials/{credential_id} — delete a credential (HTTP 204)."""
+        """DELETE /credentials/{credential_id}."""
         self._request("DELETE", f"/credentials/{credential_id}")
 
     def rotate_credential_secret(self, credential_id: str) -> RotateSecretResponse:
-        """POST /credentials/{credential_id}/rotate-secret — generate a new client secret.
-
-        Returns:
-            A ``RotateSecretResponse`` dict containing ``credentials_id``,
-            ``client_id``, and the new ``client_secret``.
-        """
+        """POST /credentials/{credential_id}/rotate-secret."""
         return self._request("POST", f"/credentials/{credential_id}/rotate-secret")
 
     # ----- Sandbox -----
     def reset_sandbox(self, org_uuid: Optional[str] = None) -> SandboxResetResponse:
-        """POST /api/sandbox/reset — reset the sandbox environment.
-
-        Args:
-            org_uuid: Optional organisation UUID to scope the reset to a
-                specific organisation's sandbox data.
-
-        Returns:
-            A ``SandboxResetResponse`` dict (shape may vary; typically
-            contains a ``status`` field).
-        """
+        """POST /api/sandbox/reset."""
         payload: dict = {}
         if org_uuid is not None:
             payload["org_uuid"] = org_uuid
@@ -1066,4 +1039,67 @@ class ButtrbaseClient:
         payload: dict = {"url": url, "events": events}
         if org_uuid is not None:
             payload["org_uuid"] = org_uuid
-        return self._request("POST", "/api/v2/webhooks", json=payload)
+        return self._request("POST", "/api/v2/webhooks", json=payload or None)
+
+    # ----- Invite-based registration -----
+    def invite_accept(
+        self,
+        token: str,
+        first_name: str,
+        last_name: str,
+        username: str,
+        password: str,
+        phone: Optional[str] = None,
+    ) -> InviteAcceptResponse:
+        """POST /api/auth/invite/accept."""
+        payload: dict = {
+            "token": token,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "password": password,
+        }
+        if phone is not None:
+            payload["phone"] = phone
+        return self._request("POST", "/api/auth/invite/accept", json=payload, auth=False)
+
+    def check_org_name(self, name: str) -> OrgCheckResponse:
+        """GET /api/auth/orgs/check?name={name}."""
+        return self._request("GET", "/api/auth/orgs/check", params={"name": name}, auth=False)
+
+    def get_superuser_flag(self, email: str) -> SuperuserResponse:
+        """GET /api/auth/superuser?email={email}."""
+        return self._request("GET", "/api/auth/superuser", params={"email": email})
+
+    # ----- Contact forms -----
+    def post_contact(
+        self,
+        name: str,
+        email: str,
+        message: str,
+        company: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact."""
+        payload: dict = {"name": name, "email": email, "message": message}
+        if company is not None:
+            payload["company"] = company
+        if app_id is not None:
+            payload["app_id"] = app_id
+        return self._request("POST", "/api/contact", json=payload, auth=False)
+
+    def post_contact_us(
+        self,
+        name: str,
+        email: str,
+        subject: str,
+        message: str,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact-us."""
+        payload: dict = {"name": name, "email": email, "subject": subject, "message": message}
+        return self._request("POST", "/api/contact-us", json=payload, auth=False)
+
+    # ----- Geo / IP -----
+    def get_client_ip(self) -> GeoResponse:
+        """GET /api/geo/ip."""
+        return self._request("GET", "/api/geo/ip", auth=False)
