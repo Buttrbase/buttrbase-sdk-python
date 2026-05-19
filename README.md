@@ -44,8 +44,9 @@ options = client.get_login_options("org-uuid")
 ### Magic Link
 
 ```python
-client.magic_link_send("user@example.com", redirect_url="https://app.example.com")
-resp = client.magic_link_verify("token-from-email")
+client.send_magic_link("user@example.com", redirect_to="https://app.example.com")
+resp = client.verify_magic_link("token-from-email")
+print(resp["access_token"])  # JWT with sub, org, aud claims
 ```
 
 ### OTP (Passwordless Phone)
