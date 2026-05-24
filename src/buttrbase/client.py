@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 from .errors import ButtrbaseError
 from .types import (
     ApiKeySummary,
+    AppRpConfig,
     AuditRow,
     ContactSubmitResponse,
     CreateApiKeyInput,
@@ -31,6 +32,7 @@ from .types import (
     RotateSecretResponse,
     SandboxResetResponse,
     SuperuserResponse,
+    UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
 )
 
@@ -1431,6 +1433,29 @@ class ButtrbaseClient:
     def delete_oauth_config(self, app_uuid: str, provider: str) -> None:
         """DELETE /api/v1/apps/:app_uuid/oauth-configs/:provider."""
         self._request("DELETE", f"/api/v1/apps/{app_uuid}/oauth-configs/{provider}")
+
+    # ===== WebAuthn relying-party config (admin) =====
+    def get_app_rp_config(self, app_uuid: str) -> AppRpConfig:
+        """GET /api/v1/apps/:app_uuid/rp-config.
+
+        Returns the per-app WebAuthn RP config. ``rp_id`` is ``None``
+        when the app has no override and falls back to the deployment
+        ``BUTTRBASE_WEBAUTHN_RP_ID`` env var.
+        """
+        return self._request("GET", f"/api/v1/apps/{app_uuid}/rp-config")
+
+    def update_app_rp_config(
+        self, app_uuid: str, patch: UpdateAppRpConfigRequest
+    ) -> AppRpConfig:
+        """PATCH /api/v1/apps/:app_uuid/rp-config.
+
+        Partial update — omit a field to leave it unchanged. Known
+        limitation: this method cannot explicitly clear ``rp_id`` back
+        to the env-var fallback; that requires raw-JSON access.
+        """
+        return self._request(
+            "PATCH", f"/api/v1/apps/{app_uuid}/rp-config", json=dict(patch)
+        )
 
     # ===== Audit log =====
     def read_audit_log(

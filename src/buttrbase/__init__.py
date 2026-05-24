@@ -4,6 +4,7 @@ from .errors import ButtrbaseError
 from . import webhooks
 from .types import (
     ApiKeySummary,
+    AppRpConfig,
     AuditRow,
     CreateApiKeyInput,
     CreateCredentialResponse,
@@ -21,6 +22,7 @@ from .types import (
     PasskeyRegistrationResult,
     RotateSecretResponse,
     SandboxResetResponse,
+    UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
 )
 
@@ -44,6 +46,9 @@ __all__ = [
     "OAuthConfigSummary",
     "CreateOAuthConfigInput",
     "UpdateOAuthConfigInput",
+    # WebAuthn RP config
+    "AppRpConfig",
+    "UpdateAppRpConfigRequest",
     # Audit log
     "AuditRow",
     # Passkeys (WebAuthn)

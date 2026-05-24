@@ -221,6 +221,39 @@ class UpdateOAuthConfigInput(TypedDict, total=False):
 
 
 # ---------------------------------------------------------------------------
+# WebAuthn relying-party config (admin)
+# ---------------------------------------------------------------------------
+
+
+class AppRpConfig(TypedDict):
+    """Per-app WebAuthn relying-party config.
+
+    ``rp_id`` is ``None`` when the app has no per-app override and the
+    server falls back to the deployment-wide ``BUTTRBASE_WEBAUTHN_RP_ID``
+    env var. ``rp_origins`` is the list of full origins (scheme + host +
+    optional port) permitted to participate in passkey ceremonies under
+    this RP.
+    """
+
+    app_uuid: str
+    rp_id: Optional[str]
+    rp_origins: List[str]
+
+
+class UpdateAppRpConfigRequest(TypedDict, total=False):
+    """Body for PATCH /api/v1/apps/:app_uuid/rp-config.
+
+    Partial update — omit a field to leave it unchanged. Note: because
+    this is an omit-vs-present patch, there is currently no way through
+    this dataclass to explicitly clear ``rp_id`` back to the env-var
+    fallback; that requires raw-JSON access.
+    """
+
+    rp_id: str
+    rp_origins: List[str]
+
+
+# ---------------------------------------------------------------------------
 # Audit log
 # ---------------------------------------------------------------------------
 
