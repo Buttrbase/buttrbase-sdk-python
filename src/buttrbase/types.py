@@ -1,7 +1,7 @@
 """Type definitions for the ButtrBase SDK."""
 from __future__ import annotations
 
-from typing import Any, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 try:
     from typing import TypedDict
@@ -195,7 +195,15 @@ class OAuthConfigSummary(TypedDict):
 
 
 class CreateOAuthConfigInput(TypedDict, total=False):
-    """Body for POST /api/v1/apps/:app_uuid/oauth-configs."""
+    """Body for POST /api/v1/apps/:app_uuid/oauth-configs.
+
+    ``provider_extras`` carries provider-specific extras as a JSON object.
+    Required for Apple sign-in
+    (``{"team_id": "...", "key_id": "...", "private_key": "<PEM>"}``);
+    the backend strips the ``private_key`` field and re-stores it as
+    ``private_key_encrypted`` under the app's DEK. Optional for
+    providers that don't need extras (Google, Microsoft, GitHub).
+    """
 
     provider: str
     client_id: str
@@ -203,6 +211,7 @@ class CreateOAuthConfigInput(TypedDict, total=False):
     redirect_uris: List[str]
     scopes: List[str]
     enabled: bool
+    provider_extras: Dict[str, Any]
 
 
 class UpdateOAuthConfigInput(TypedDict, total=False):
@@ -210,7 +219,9 @@ class UpdateOAuthConfigInput(TypedDict, total=False):
 
     Every field is optional. Sending ``client_secret`` as ``""`` or
     omitting it leaves the stored ciphertext untouched — only a
-    non-empty value rotates the secret.
+    non-empty value rotates the secret. ``provider_extras`` replaces
+    the existing JSON blob entirely; for Apple a fresh ``private_key``
+    triggers re-encryption under the app's DEK.
     """
 
     client_id: str
@@ -218,6 +229,7 @@ class UpdateOAuthConfigInput(TypedDict, total=False):
     redirect_uris: List[str]
     scopes: List[str]
     enabled: bool
+    provider_extras: Dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
