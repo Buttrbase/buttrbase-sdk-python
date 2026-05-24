@@ -1,5 +1,7 @@
 # Python SDK
 
+> **Breaking — v0.2 — `app_uuid: str` replaces the `app` slug parameter** on `register`, `login`, `send_otp`, `verify_otp`, `send_magic_link`, `verify_magic_link`, and `lookup_organizations`. The backend no longer accepts slug-shaped app identifiers — pass the UUID directly. The OTP methods are also renamed from `otp_send`/`otp_verify` to `send_otp`/`verify_otp`. See `CHANGELOG.md`.
+
 ## Overview
 
 The official Python SDK for ButtrBase. Synchronous, `requests`-based client covering every API surface — auth, organizations, billing, RBAC, teams, credentials, search, AI gateway, webhooks, zero-trust, and more.
@@ -17,8 +19,13 @@ from buttrbase import ButtrbaseClient
 
 client = ButtrbaseClient(api_key="bb_live_...")
 
-# Login
-resp = client.login("user@example.com", "password", "acme")
+# Login — app_uuid is required (the UUID for your app on ButtrBase)
+resp = client.login(
+    "user@example.com",
+    "password",
+    org_name="acme",
+    app_uuid="018f1234-5678-7000-8000-000000000001",
+)
 print(resp["access_token"])
 
 # Get profile
@@ -31,8 +38,22 @@ print(profile)
 ### Register
 
 ```python
-resp = client.register("user@example.com", "password", "acme",
-                       first_name="Jane", last_name="Doe")
+APP_UUID = "018f1234-5678-7000-8000-000000000001"
+
+resp = client.register(
+    "user@example.com",
+    "password",
+    org_name="acme",
+    app_uuid=APP_UUID,
+    first_name="Jane",
+    last_name="Doe",
+)
+```
+
+### Organization Lookup
+
+```python
+resp = client.lookup_organizations("user@example.com", app_uuid=APP_UUID)
 ```
 
 ### Login Options
@@ -44,16 +65,87 @@ options = client.get_login_options("org-uuid")
 ### Magic Link
 
 ```python
-client.send_magic_link("user@example.com", redirect_to="https://app.example.com")
-resp = client.verify_magic_link("token-from-email")
+client.send_magic_link(
+    "user@example.com",
+    app_uuid=APP_UUID,
+    redirect_to="https://app.example.com",
+)
+resp = client.verify_magic_link("token-from-email", app_uuid=APP_UUID)
 print(resp["access_token"])  # JWT with sub, org, aud claims
 ```
 
 ### OTP (Passwordless Phone)
 
 ```python
-client.otp_send("phone")
-resp = client.otp_verify("phone", "123456")
+client.send_otp("+15551234567", app_uuid=APP_UUID)
+resp = client.verify_otp("+15551234567", "123456", app_uuid=APP_UUID)
+```
+
+### Passkey support (WebAuthn)
+
+Thin wrappers around the four passkey ceremony endpoints. The WebAuthn JSON
+blobs are pass-through `Any` — the browser's `navigator.credentials.create /
+.get` APIs consume and produce them directly. No webauthn helper library is
+pulled in on the SDK side.
+
+```python
+# Registration (requires an authenticated caller — the passkey is added to
+# the user's existing account). The browser does the actual WebAuthn ceremony.
+begin = client.passkey_register_begin()
+# ... hand begin["challenge"] to the browser, get back a credential ...
+result = client.passkey_register_complete({
+    "registration_state": begin["registration_state"],
+    "credential": browser_credential,
+})
+print(result["credential_id"])
+
+# Authentication (anonymous):
+ch = client.passkey_authenticate_begin()
+# ... browser produces an assertion ...
+session = client.passkey_authenticate_complete({
+    "auth_state": ch["auth_state"],
+    "credential": browser_assertion,
+})
+
+# List the signed-in user's enrolled passkeys (descending by created_at):
+passkeys = client.list_my_passkeys()
+for p in passkeys:
+    print(p.get("nickname") or p["credential_id_prefix"], p["credential_uuid"])
+
+# Revoke one by its credential_uuid (owner check enforced server-side):
+client.delete_my_passkey(passkeys[0]["credential_uuid"])
+```
+
+### OAuth (Google / Microsoft / GitHub / Apple)
+
+```python
+# The SDK builds the URL — there is no network call here. Redirect
+# the user-agent to the returned string; the backend 302s onward to
+# the provider with a signed state token.
+url = client.oauth_start_url(
+    "google",
+    app_uuid=APP_UUID,
+    return_to="https://app.example.com/auth/google/callback",
+)
+# Send `url` back to the browser as a 302 Location.
+```
+
+### API Key Exchange (initial + refresh rotation cycle)
+
+```python
+# 1. Initial exchange — long-lived raw key in, short-lived JWT out.
+exchanged = client.exchange_api_key("wb_live_xa9dBz…")
+access = exchanged["access_token"]
+refresh = exchanged["refresh_token"]
+
+# 2. Use the access JWT until it expires (~60 min).
+authed = ButtrbaseClient(api_key=access)
+
+# 3. When it expires, swap the refresh token for a fresh pair.
+#    The presented refresh token is one-time-use — store the new one.
+rotated = client.exchange_refresh_token(refresh)
+access = rotated["access_token"]
+refresh = rotated["refresh_token"]
 ```
 
 ### SSO (OIDC / SAML)
@@ -333,6 +425,85 @@ Errors are raised as `buttrbase.ButtrbaseError` with `status_code`, `code`, `det
 
 See https://buttrbase.com/docs for the full API reference.
 
+## App-Level API Keys (admin)
+
+```python
+APP_UUID = "018f1234-5678-7000-8000-000000000001"
+
+# List every key for the app (including revoked ones). raw_key is
+# never included here.
+keys = client.list_app_api_keys(APP_UUID)
+
+# Create a short-lived production key. raw_key is shown EXACTLY ONCE
+# in the response — save it now or rotate to get a new one.
+created = client.create_app_api_key(
+    APP_UUID,
+    {"name": "production-server", "env": "live", "key_type": "short_lived"},
+)
+raw = created["raw_key"]  # wb_live_xa9dBz… — store this in a secret manager
+
+# Time-boxed key for a contractor.
+client.create_app_api_key(
+    APP_UUID,
+    {
+        "name": "contractor-march-2026",
+        "env": "live",
+        "key_type": "expiring",
+        "expiry": {"in_days": 30},
+    },
+)
+
+# Rotate — issues a new key, immediately revokes the old. raw_key
+# shown once.
+rotated = client.rotate_app_api_key(APP_UUID, created["key_uuid"])
+
+# Revoke. Idempotent — re-revoking an already-revoked key is a no-op.
+# Also invalidates every refresh token issued against the key.
+client.revoke_app_api_key(APP_UUID, created["key_uuid"])
+```
+
+## OAuth Configs (admin)
+
+```python
+APP_UUID = "018f1234-5678-7000-8000-000000000001"
+
+# Register a Google config — client_secret is encrypted at rest and
+# never returned by any GET.
+cfg = client.create_oauth_config(
+    APP_UUID,
+    {
+        "provider": "google",
+        "client_id": "1234.apps.googleusercontent.com",
+        "client_secret": "GOCSPX-…",
+        "redirect_uris": [
+            "http://localhost:3000/auth/google/callback",
+            "https://app.example.com/auth/google/callback",
+        ],
+        "scopes": ["openid", "email", "profile"],
+        "enabled": True,
+    },
+)
+
+# Patch — every field is optional. Omitting client_secret (or sending
+# "") leaves the stored ciphertext untouched.
+client.update_oauth_config(APP_UUID, "google", {"enabled": False})
+
+configs = client.list_oauth_configs(APP_UUID)
+client.delete_oauth_config(APP_UUID, "google")
+```
+
+## Audit Log
+
+```python
+# Most recent events for the app.
+events = client.read_audit_log(APP_UUID, limit=50)
+
+# Filter to just API-key lifecycle events.
+key_events = client.read_audit_log(
+    APP_UUID, limit=100, action_prefix="api_key."
+)
+```
+
 ## Recipes
 
 ### Complete Onboarding
@@ -341,10 +512,22 @@ See https://buttrbase.com/docs for the full API reference.
 from buttrbase import ButtrbaseClient
 
 client = ButtrbaseClient(api_key="bb_live_...")
+APP_UUID = "018f1234-5678-7000-8000-000000000001"
 
 # 1. Register and login
-client.register("admin@acme.com", "s3cur3!", "Acme Corp", first_name="Alice")
-resp = client.login("admin@acme.com", "s3cur3!", "Acme Corp")
+client.register(
+    "admin@acme.com",
+    "s3cur3!",
+    org_name="acme",
+    app_uuid=APP_UUID,
+    first_name="Alice",
+)
+resp = client.login(
+    "admin@acme.com",
+    "s3cur3!",
+    org_name="acme",
+    app_uuid=APP_UUID,
+)
 
 # 2. Get profile
 profile = client.get_profile()
@@ -352,6 +535,54 @@ profile = client.get_profile()
 # 3. Create a team and add a member
 team = client.create_team({"name": "Engineering", "org_uuid": profile["org"]["uuid"]})
 client.add_team_member(team["uuid"], "colleague-user-uuid")
+```
+
+### Backend-to-Backend Auth (short-lived + refresh rotation)
+
+```python
+APP_UUID = "018f1234-5678-7000-8000-000000000001"
+
+# 1. (One-time, in the admin UI or via SDK) — create a short_lived key.
+admin = ButtrbaseClient(api_key=ADMIN_JWT)
+created = admin.create_app_api_key(
+    APP_UUID,
+    {"name": "prod-srv", "env": "live", "key_type": "short_lived"},
+)
+RAW_KEY = created["raw_key"]  # save this — shown once
+
+# 2. On boot, your server exchanges the raw key for an access JWT.
+anon = ButtrbaseClient(api_key="")
+pair = anon.exchange_api_key(RAW_KEY)
+client = ButtrbaseClient(api_key=pair["access_token"])
+refresh = pair["refresh_token"]
+
+# 3. Before the access token expires (~60 min), rotate.
+pair = anon.exchange_refresh_token(refresh)
+client.api_key = pair["access_token"]
+refresh = pair["refresh_token"]  # one-time-use — overwrite stored value
+```
+
+### Registering a Social Login Provider
+
+```python
+client.create_oauth_config(
+    APP_UUID,
+    {
+        "provider": "microsoft",
+        "client_id": "<azure-app-client-id>",
+        "client_secret": "<azure-app-secret>",
+        "redirect_uris": ["https://app.example.com/auth/microsoft/callback"],
+        "scopes": ["openid", "email", "profile"],
+        "enabled": True,
+    },
+)
+
+# Then, from the browser flow:
+url = client.oauth_start_url(
+    "microsoft",
+    app_uuid=APP_UUID,
+    return_to="https://app.example.com/auth/microsoft/callback",
+)
 ```
 
 ### MFA Enrollment

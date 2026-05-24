@@ -3,19 +3,55 @@ from .client import ButtrbaseClient
 from .errors import ButtrbaseError
 from . import webhooks
 from .types import (
-    Credential,
+    ApiKeySummary,
+    AuditRow,
+    CreateApiKeyInput,
     CreateCredentialResponse,
+    CreateOAuthConfigInput,
+    CreatedKeyResponse,
+    Credential,
+    ExchangeResponse,
+    ExpiryInput,
+    OAuthConfigSummary,
+    PasskeyAuthChallenge,
+    PasskeyAuthComplete,
+    PasskeyListItem,
+    PasskeyRegistrationChallenge,
+    PasskeyRegistrationComplete,
+    PasskeyRegistrationResult,
     RotateSecretResponse,
     SandboxResetResponse,
+    UpdateOAuthConfigInput,
 )
 
 __all__ = [
     "ButtrbaseClient",
     "ButtrbaseError",
     "webhooks",
+    # Legacy types
     "Credential",
     "CreateCredentialResponse",
     "RotateSecretResponse",
     "SandboxResetResponse",
+    # API key exchange
+    "ExchangeResponse",
+    # App API keys
+    "ApiKeySummary",
+    "CreatedKeyResponse",
+    "CreateApiKeyInput",
+    "ExpiryInput",
+    # OAuth configs
+    "OAuthConfigSummary",
+    "CreateOAuthConfigInput",
+    "UpdateOAuthConfigInput",
+    # Audit log
+    "AuditRow",
+    # Passkeys (WebAuthn)
+    "PasskeyRegistrationChallenge",
+    "PasskeyRegistrationComplete",
+    "PasskeyRegistrationResult",
+    "PasskeyAuthChallenge",
+    "PasskeyAuthComplete",
+    "PasskeyListItem",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

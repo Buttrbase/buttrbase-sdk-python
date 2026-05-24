@@ -1,7 +1,7 @@
 """Type definitions for the ButtrBase SDK."""
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, List, Optional, Union
 
 try:
     from typing import TypedDict
@@ -95,3 +95,216 @@ class GeoResponse(TypedDict):
     ip: str
     country: str
     timezone: str
+
+
+# ---------------------------------------------------------------------------
+# API key exchange (anonymous)
+# ---------------------------------------------------------------------------
+
+
+class ExchangeResponse(TypedDict):
+    """Response from POST /api/v1/auth/api-key/exchange.
+
+    Returned by both the initial (``api_key``) and refresh
+    (``refresh_token``) modes.
+    """
+
+    access_token: str
+    refresh_token: str
+    token_type: str
+    access_expires_at: str
+    refresh_expires_at: str
+
+
+# ---------------------------------------------------------------------------
+# App-level API keys (admin)
+# ---------------------------------------------------------------------------
+
+
+class ApiKeySummary(TypedDict):
+    """A key as returned by list / metadata endpoints.
+
+    ``raw_key`` is **never** present here — only on create / rotate
+    (``CreatedKeyResponse``).
+    """
+
+    key_uuid: str
+    app_uuid: str
+    key_prefix: str
+    name: str
+    key_type: str  # "short_lived" | "permanent" | "expiring"
+    expires_at: Optional[str]
+    last_used_at: Optional[str]
+    revoked_at: Optional[str]
+    created_at: str
+
+
+class CreatedKeyResponse(TypedDict):
+    """Response from create / rotate.
+
+    The ``raw_key`` field is shown **exactly once** — the server stores
+    only the SHA-256 hash and cannot recover it later.
+    """
+
+    key_uuid: str
+    raw_key: str
+    key_prefix: str
+    key_type: str
+    expires_at: Optional[str]
+
+
+class ExpiryInput(TypedDict, total=False):
+    """Expiry envelope for ``expiring`` keys.
+
+    Set **exactly one** of ``absolute`` (RFC3339 timestamp) or
+    ``in_days`` (relative day count).
+    """
+
+    absolute: str
+    in_days: int
+
+
+class CreateApiKeyInput(TypedDict, total=False):
+    """Body for POST /api/v1/apps/:app_uuid/api-keys.
+
+    ``expiry`` is required when ``key_type == "expiring"`` and ignored
+    otherwise.
+    """
+
+    name: str
+    env: str  # "live" | "test"
+    key_type: str  # "short_lived" | "permanent" | "expiring"
+    expiry: ExpiryInput
+
+
+# ---------------------------------------------------------------------------
+# OAuth configs (admin)
+# ---------------------------------------------------------------------------
+
+
+class OAuthConfigSummary(TypedDict):
+    """A per-app OAuth provider config (no secrets)."""
+
+    provider: str  # "google" | "microsoft" | "github" | "apple"
+    client_id: str
+    redirect_uris: List[str]
+    scopes: List[str]
+    enabled: bool
+    created_at: str
+    updated_at: str
+
+
+class CreateOAuthConfigInput(TypedDict, total=False):
+    """Body for POST /api/v1/apps/:app_uuid/oauth-configs."""
+
+    provider: str
+    client_id: str
+    client_secret: str
+    redirect_uris: List[str]
+    scopes: List[str]
+    enabled: bool
+
+
+class UpdateOAuthConfigInput(TypedDict, total=False):
+    """Body for PATCH /api/v1/apps/:app_uuid/oauth-configs/:provider.
+
+    Every field is optional. Sending ``client_secret`` as ``""`` or
+    omitting it leaves the stored ciphertext untouched — only a
+    non-empty value rotates the secret.
+    """
+
+    client_id: str
+    client_secret: str
+    redirect_uris: List[str]
+    scopes: List[str]
+    enabled: bool
+
+
+# ---------------------------------------------------------------------------
+# Audit log
+# ---------------------------------------------------------------------------
+
+
+class AuditRow(TypedDict):
+    """A row from GET /api/v1/apps/:app_uuid/audit-log."""
+
+    id: str
+    app_uuid: str
+    actor_user_uuid: Optional[str]
+    action: str
+    target_id: Optional[str]
+    details: Optional[dict]
+    ip: Optional[str]
+    user_agent: Optional[str]
+    created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Passkeys (WebAuthn)
+# ---------------------------------------------------------------------------
+#
+# The WebAuthn challenge / credential blobs are pass-through ``Any`` JSON —
+# the browser's ``navigator.credentials.create / .get`` APIs consume and
+# produce them directly. We deliberately don't introduce a webauthn helper
+# library on the SDK side.
+
+
+class PasskeyRegistrationChallenge(TypedDict):
+    """Response from POST /api/passkeys/register/begin.
+
+    ``challenge`` is a WebAuthn ``CreationChallengeResponse``; pass
+    ``challenge['publicKey']`` to ``navigator.credentials.create`` in the
+    browser. ``registration_state`` is an opaque server-signed blob that must
+    be sent back unchanged on the matching complete call.
+    """
+
+    challenge: Any
+    registration_state: str
+
+
+class PasskeyRegistrationComplete(TypedDict):
+    """Body for POST /api/passkeys/register/complete.
+
+    ``credential`` is the WebAuthn ``RegisterPublicKeyCredential`` produced by
+    the browser.
+    """
+
+    registration_state: str
+    credential: Any
+
+
+class PasskeyRegistrationResult(TypedDict):
+    """Response from POST /api/passkeys/register/complete."""
+
+    credential_id: str
+    message: str
+
+
+class PasskeyAuthChallenge(TypedDict):
+    """Response from POST /api/passkeys/authenticate/begin."""
+
+    challenge: Any
+    auth_state: str
+
+
+class PasskeyAuthComplete(TypedDict):
+    """Body for POST /api/passkeys/authenticate/complete."""
+
+    auth_state: str
+    credential: Any
+
+
+class PasskeyListItem(TypedDict):
+    """A single row returned by GET /api/v1/me/passkeys.
+
+    ``credential_id_prefix`` is the first 12 characters of the WebAuthn
+    credential ID — enough to disambiguate in a dashboard without exposing
+    the full identifier. Timestamps are RFC 3339 strings.
+    """
+
+    credential_uuid: str
+    credential_id_prefix: str
+    app_uuid: Optional[str]
+    nickname: Optional[str]
+    last_used_at: Optional[str]
+    created_at: str

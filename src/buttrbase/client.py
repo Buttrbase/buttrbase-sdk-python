@@ -1,21 +1,37 @@
 """ButtrBase API client."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import requests
 
+from urllib.parse import urlencode
+
 from .errors import ButtrbaseError
 from .types import (
-    Credential,
+    ApiKeySummary,
+    AuditRow,
+    ContactSubmitResponse,
+    CreateApiKeyInput,
     CreateCredentialResponse,
+    CreateOAuthConfigInput,
+    CreatedKeyResponse,
+    Credential,
+    ExchangeResponse,
+    GeoResponse,
+    InviteAcceptResponse,
+    OAuthConfigSummary,
+    OrgCheckResponse,
+    PasskeyAuthChallenge,
+    PasskeyAuthComplete,
+    PasskeyListItem,
+    PasskeyRegistrationChallenge,
+    PasskeyRegistrationComplete,
+    PasskeyRegistrationResult,
     RotateSecretResponse,
     SandboxResetResponse,
-    InviteAcceptResponse,
-    OrgCheckResponse,
     SuperuserResponse,
-    ContactSubmitResponse,
-    GeoResponse,
+    UpdateOAuthConfigInput,
 )
 
 DEFAULT_BASE_URL = "https://stagingapi.buttrbase.com"
@@ -113,19 +129,40 @@ class ButtrbaseClient:
     def send_magic_link(
         self,
         email: str,
+        app_uuid: str,
         org_uuid: Optional[str] = None,
         redirect_to: Optional[str] = None,
     ) -> dict:
-        payload: dict = {"email": email}
+        """POST /api/auth/magic-link/send.
+
+        Args:
+            email: The recipient's email address.
+            app_uuid: UUID of the target app (string-formatted UUID). This
+                replaced the legacy ``app`` slug parameter. Example:
+                ``"018f1234-5678-7000-8000-000000000001"``.
+            org_uuid: Optional org scope.
+            redirect_to: Optional URL the user lands on after clicking.
+        """
+        payload: dict = {"email": email, "app_uuid": app_uuid}
         if org_uuid is not None:
             payload["org_uuid"] = org_uuid
         if redirect_to is not None:
             payload["redirect_to"] = redirect_to
-        return self._request("POST", "/api/v1/auth/magic-link/send", json=payload, auth=False)
+        return self._request("POST", "/api/auth/magic-link/send", json=payload, auth=False)
 
-    def verify_magic_link(self, token: str) -> dict:
+    def verify_magic_link(self, token: str, app_uuid: str) -> dict:
+        """POST /api/v1/auth/magic-link/verify.
+
+        Args:
+            token: The single-use token from the magic-link email.
+            app_uuid: UUID of the target app (string-formatted UUID).
+                Replaced the legacy ``app`` slug parameter.
+        """
         return self._request(
-            "POST", "/api/v1/auth/magic-link/verify", json={"token": token}, auth=False
+            "POST",
+            "/api/v1/auth/magic-link/verify",
+            json={"token": token, "app_uuid": app_uuid},
+            auth=False,
         )
 
     # ----- MFA -----
@@ -318,24 +355,68 @@ class ButtrbaseClient:
         email: str,
         password: str,
         org_name: str,
+        app_uuid: str,
         first_name: Optional[str] = None,
         last_name: Optional[str] = None,
     ) -> dict:
-        """POST /api/auth/register."""
-        payload: dict = {"email": email, "password": password, "org_name": org_name}
+        """POST /api/auth/register.
+
+        Args:
+            email: The new user's email address.
+            password: The new user's password.
+            org_name: The organisation name (a different concept from app —
+                an org owns users, an app routes auth).
+            app_uuid: UUID of the target app (string-formatted UUID). This
+                replaced the legacy ``app`` slug parameter. Example:
+                ``"018f1234-5678-7000-8000-000000000001"``.
+            first_name: Optional given name.
+            last_name: Optional family name.
+        """
+        payload: dict = {
+            "email": email,
+            "password": password,
+            "org_name": org_name,
+            "app_uuid": app_uuid,
+        }
         if first_name is not None:
             payload["first_name"] = first_name
         if last_name is not None:
             payload["last_name"] = last_name
         return self._request("POST", "/api/auth/register", json=payload, auth=False)
 
-    def login(self, email: str, password: str, org_name: str) -> dict:
-        """POST /api/auth/login."""
-        payload = {"email": email, "password": password, "org_name": org_name}
+    def login(self, email: str, password: str, org_name: str, app_uuid: str) -> dict:
+        """POST /api/auth/login.
+
+        Args:
+            email: The user's email address.
+            password: The user's password.
+            org_name: The organisation name.
+            app_uuid: UUID of the target app (string-formatted UUID).
+                Replaced the legacy ``app`` slug parameter.
+        """
+        payload = {
+            "email": email,
+            "password": password,
+            "org_name": org_name,
+            "app_uuid": app_uuid,
+        }
         body = self._request("POST", "/api/auth/login", json=payload, auth=False)
         if isinstance(body, dict) and body.get("access_token"):
             self.api_key = body["access_token"]
         return body
+
+    def lookup_organizations(self, email: str, app_uuid: str) -> dict:
+        """POST /api/auth/organizations/lookup.
+
+        Args:
+            email: The email to look up.
+            app_uuid: UUID of the target app (string-formatted UUID).
+                Replaced the legacy ``app`` slug parameter.
+        """
+        payload = {"email": email, "app_uuid": app_uuid}
+        return self._request(
+            "POST", "/api/auth/organizations/lookup", json=payload, auth=False
+        )
 
     def get_login_options(self, org_uuid: str) -> dict:
         """GET /api/auth/organizations/{org_uuid}/login-options."""
@@ -358,13 +439,37 @@ class ButtrbaseClient:
         return self._request("GET", f"/api/auth/orgs-by-domain/{domain}", auth=False)
 
     # ----- OTP -----
-    def otp_send(self, phone: str) -> dict:
-        """POST /api/auth/otp/send."""
-        return self._request("POST", "/api/auth/otp/send", json={"phone": phone})
+    def send_otp(self, phone: str, app_uuid: str) -> dict:
+        """POST /api/auth/otp.
 
-    def otp_verify(self, phone: str, code: str) -> dict:
-        """POST /api/auth/otp/verify."""
-        return self._request("POST", "/api/auth/otp/verify", json={"phone": phone, "code": code})
+        Args:
+            phone: The destination phone number in E.164 format.
+            app_uuid: UUID of the target app (string-formatted UUID).
+                Replaced the legacy ``app`` slug parameter.
+        """
+        return self._request(
+            "POST",
+            "/api/auth/otp",
+            json={"phone": phone, "app_uuid": app_uuid},
+            auth=False,
+        )
+
+    def verify_otp(self, phone: str, code: str, app_uuid: str) -> dict:
+        """POST /api/auth/otp/verify.
+
+        Args:
+            phone: The phone number the OTP was sent to.
+            code: The OTP code the user provided.
+            app_uuid: UUID of the target app (string-formatted UUID).
+                Replaced the legacy ``app`` slug parameter.
+        """
+        return self._request(
+            "POST",
+            "/api/auth/otp/verify",
+            json={"phone": phone, "code": code, "app_uuid": app_uuid},
+            auth=False,
+        )
+
 
     # ----- MFA (extended) -----
     def mfa_verify(self, code: str) -> dict:
@@ -386,6 +491,87 @@ class ButtrbaseClient:
     def mfa_redeem_recovery_code(self, code: str) -> dict:
         """POST /api/auth/mfa/recovery-codes/redeem."""
         return self._request("POST", "/api/auth/mfa/recovery-codes/redeem", json={"code": code})
+
+    # ----- Passkeys (WebAuthn) -----
+    #
+    # Thin HTTP wrappers around the four passkey ceremony endpoints. The
+    # WebAuthn challenge / credential blobs are pass-through ``Any`` JSON —
+    # the browser's ``navigator.credentials.create / .get`` APIs consume and
+    # produce them directly. Begin endpoints unwrap the backend's
+    # ``{"data": ...}`` envelope for ergonomics.
+
+    def passkey_register_begin(self) -> PasskeyRegistrationChallenge:
+        """POST /api/passkeys/register/begin.
+
+        Start passkey registration. Requires an authenticated caller (the
+        passkey is added to the user's existing account). Pass the returned
+        ``challenge`` to ``navigator.credentials.create({publicKey: ...})``
+        in the browser.
+        """
+        resp = self._request("POST", "/api/passkeys/register/begin")
+        return resp.get("data", resp) if isinstance(resp, dict) else resp
+
+    def passkey_register_complete(
+        self, body: PasskeyRegistrationComplete
+    ) -> PasskeyRegistrationResult:
+        """POST /api/passkeys/register/complete.
+
+        Finish passkey registration. ``body['credential']`` is the WebAuthn
+        ``RegisterPublicKeyCredential`` returned by the browser.
+        """
+        resp = self._request(
+            "POST", "/api/passkeys/register/complete", json=dict(body)
+        )
+        return resp.get("data", resp) if isinstance(resp, dict) else resp
+
+    def passkey_authenticate_begin(self) -> PasskeyAuthChallenge:
+        """POST /api/passkeys/authenticate/begin.
+
+        Anonymous; no Authorization header required. Pass the returned
+        ``challenge`` to ``navigator.credentials.get({publicKey: ...})``.
+        """
+        resp = self._request(
+            "POST", "/api/passkeys/authenticate/begin", auth=False
+        )
+        return resp.get("data", resp) if isinstance(resp, dict) else resp
+
+    def passkey_authenticate_complete(self, body: PasskeyAuthComplete) -> dict:
+        """POST /api/passkeys/authenticate/complete.
+
+        Returns the session payload (shape currently unstable on the
+        backend).
+        """
+        return self._request(
+            "POST",
+            "/api/passkeys/authenticate/complete",
+            json=dict(body),
+            auth=False,
+        )
+
+    def list_my_passkeys(self) -> List[PasskeyListItem]:
+        """GET /api/v1/me/passkeys.
+
+        List the signed-in user's enrolled passkeys, in descending
+        ``created_at`` order. Each row carries ``credential_uuid`` (for
+        revocation) and ``credential_id_prefix`` (a 12-char display fragment
+        of the full WebAuthn credential ID).
+        """
+        resp = self._request("GET", "/api/v1/me/passkeys")
+        # Backend returns the list directly; tolerate a {"data": [...]}
+        # envelope in case a proxy layer wraps it.
+        if isinstance(resp, dict) and isinstance(resp.get("data"), list):
+            return resp["data"]
+        return resp if isinstance(resp, list) else []
+
+    def delete_my_passkey(self, credential_uuid: str) -> dict:
+        """DELETE /api/v1/me/passkeys/{credential_uuid}.
+
+        Revoke one of the signed-in user's passkeys. The owner check is
+        enforced on the backend; UUIDs owned by other users return 404.
+        """
+        return self._request(
+            "DELETE", f"/api/v1/me/passkeys/{credential_uuid}"
+        )
 
     # ----- SSO -----
     def oidc_authorize_url(self, connection_uuid: str) -> dict:
@@ -1103,3 +1289,172 @@ class ButtrbaseClient:
     def get_client_ip(self) -> GeoResponse:
         """GET /api/geo/ip."""
         return self._request("GET", "/api/geo/ip", auth=False)
+
+    # ===== API key exchange (anonymous) =====
+    def exchange_api_key(self, api_key: str) -> ExchangeResponse:
+        """POST /api/v1/auth/api-key/exchange — initial exchange.
+
+        Trade a long-lived ``short_lived`` raw key (``wb_<env>_<random>``)
+        for a short-lived access JWT plus a 90-day rotating refresh
+        token. The raw key is never sent on hot-path requests after this.
+
+        Args:
+            api_key: The raw key returned exactly once from
+                ``create_app_api_key`` / ``rotate_app_api_key``.
+        """
+        return self._request(
+            "POST",
+            "/api/v1/auth/api-key/exchange",
+            json={"api_key": api_key},
+            auth=False,
+        )
+
+    def exchange_refresh_token(self, refresh_token: str) -> ExchangeResponse:
+        """POST /api/v1/auth/api-key/exchange — refresh exchange.
+
+        Trade an opaque refresh token from a previous exchange for a
+        fresh access/refresh pair. The presented refresh token is
+        immediately revoked — refresh is one-time-use.
+        """
+        return self._request(
+            "POST",
+            "/api/v1/auth/api-key/exchange",
+            json={"refresh_token": refresh_token},
+            auth=False,
+        )
+
+    # ===== OAuth start URL helper =====
+    def oauth_start_url(self, provider: str, app_uuid: str, return_to: str) -> str:
+        """Build the public OAuth ``/start`` URL.
+
+        Returns the URL string only — no network call is made. Redirect
+        the user-agent to it; the backend will 302 onward to the
+        provider's authorize endpoint with a signed ``state``.
+
+        Args:
+            provider: ``google``, ``microsoft``, ``github``, or ``apple``.
+                Only ``google``/``microsoft`` have authorize-URL builders
+                wired today; the others 400 with ``unsupported provider``.
+            app_uuid: UUID of the target app (string-formatted UUID).
+            return_to: The post-callback URL — must exactly match one of
+                the ``redirect_uris`` registered on the OAuth config.
+        """
+        query = urlencode({"app_uuid": app_uuid, "return_to": return_to})
+        return f"{self.base_url}/api/v1/auth/oauth/{provider}/start?{query}"
+
+    # ===== App-level API keys (admin) =====
+    def list_app_api_keys(self, app_uuid: str) -> list:
+        """GET /api/v1/apps/:app_uuid/api-keys.
+
+        Returns every key for the app — including revoked ones —
+        without ``raw_key``. Each row is an ``ApiKeySummary``.
+        """
+        return self._request("GET", f"/api/v1/apps/{app_uuid}/api-keys")
+
+    def create_app_api_key(
+        self, app_uuid: str, input: CreateApiKeyInput
+    ) -> CreatedKeyResponse:
+        """POST /api/v1/apps/:app_uuid/api-keys.
+
+        ``raw_key`` is returned **exactly once** — the server stores
+        only the SHA-256 hash and cannot recover it later. If you don't
+        save it on this call, you'll need to rotate to get a new one.
+
+        For ``key_type == "expiring"`` set ``expiry`` to either
+        ``{"absolute": "<RFC3339>"}`` or ``{"in_days": N}``. Both
+        resolve to a UTC timestamp at create time.
+        """
+        return self._request(
+            "POST", f"/api/v1/apps/{app_uuid}/api-keys", json=dict(input)
+        )
+
+    def revoke_app_api_key(self, app_uuid: str, key_uuid: str) -> None:
+        """DELETE /api/v1/apps/:app_uuid/api-keys/:key_uuid.
+
+        Idempotent — revoking an already-revoked key is a no-op. Also
+        invalidates every refresh token issued against this key.
+        """
+        self._request("DELETE", f"/api/v1/apps/{app_uuid}/api-keys/{key_uuid}")
+
+    def rotate_app_api_key(
+        self, app_uuid: str, key_uuid: str
+    ) -> CreatedKeyResponse:
+        """POST /api/v1/apps/:app_uuid/api-keys/:key_uuid/rotate.
+
+        Issues a new key with the same name (suffixed ``(rotated)``),
+        type, and env as the original, then revokes the old one.
+        Returns the same shape as create — ``raw_key`` shown once.
+        """
+        return self._request(
+            "POST", f"/api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate"
+        )
+
+    # ===== OAuth configs (admin) =====
+    def list_oauth_configs(self, app_uuid: str) -> list:
+        """GET /api/v1/apps/:app_uuid/oauth-configs.
+
+        Returns every configured provider for the app. ``client_secret``
+        is **never** returned. Each row is an ``OAuthConfigSummary``.
+        """
+        return self._request("GET", f"/api/v1/apps/{app_uuid}/oauth-configs")
+
+    def create_oauth_config(
+        self, app_uuid: str, input: CreateOAuthConfigInput
+    ) -> OAuthConfigSummary:
+        """POST /api/v1/apps/:app_uuid/oauth-configs.
+
+        Every ``redirect_uris`` entry must be ``https://…`` or
+        ``http://localhost…`` — plain http to non-localhost is rejected.
+        """
+        return self._request(
+            "POST", f"/api/v1/apps/{app_uuid}/oauth-configs", json=dict(input)
+        )
+
+    def update_oauth_config(
+        self,
+        app_uuid: str,
+        provider: str,
+        patch: UpdateOAuthConfigInput,
+    ) -> OAuthConfigSummary:
+        """PATCH /api/v1/apps/:app_uuid/oauth-configs/:provider.
+
+        Every field is optional. ``client_secret`` only rotates when
+        sent as a non-empty value — sending ``""`` or omitting it
+        leaves the stored ciphertext untouched.
+        """
+        return self._request(
+            "PATCH",
+            f"/api/v1/apps/{app_uuid}/oauth-configs/{provider}",
+            json=dict(patch),
+        )
+
+    def delete_oauth_config(self, app_uuid: str, provider: str) -> None:
+        """DELETE /api/v1/apps/:app_uuid/oauth-configs/:provider."""
+        self._request("DELETE", f"/api/v1/apps/{app_uuid}/oauth-configs/{provider}")
+
+    # ===== Audit log =====
+    def read_audit_log(
+        self,
+        app_uuid: str,
+        limit: Optional[int] = None,
+        action_prefix: Optional[str] = None,
+    ) -> list:
+        """GET /api/v1/apps/:app_uuid/audit-log.
+
+        Args:
+            app_uuid: UUID of the target app.
+            limit: Cap on number of rows returned (server enforces an
+                upper bound).
+            action_prefix: Optional action-string prefix filter — e.g.
+                ``"api_key."`` returns only key lifecycle events.
+        """
+        params: dict = {}
+        if limit is not None:
+            params["limit"] = limit
+        if action_prefix is not None:
+            params["action_prefix"] = action_prefix
+        return self._request(
+            "GET",
+            f"/api/v1/apps/{app_uuid}/audit-log",
+            params=params or None,
+        )
