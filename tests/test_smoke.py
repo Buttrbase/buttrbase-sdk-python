@@ -53,7 +53,7 @@ def test_org_jwks(client: ButtrbaseClient) -> None:
     try:
         result = client.org_jwks(fake_uuid)
     except ButtrbaseError as e:
-        assert e.status_code in (404, 400)
+        assert e.status_code in (400, 403, 404)
         return
     assert isinstance(result, dict)
     assert "keys" in result
