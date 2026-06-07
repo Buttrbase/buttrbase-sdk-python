@@ -353,3 +353,71 @@ class PasskeyListItem(TypedDict):
     nickname: Optional[str]
     last_used_at: Optional[str]
     created_at: str
+
+
+# ----- Password reset -----
+
+class PasswordResetRequestResponse(TypedDict):
+    """Response from POST /api/auth/request-password-reset."""
+
+    message: str
+
+
+class PasswordResetResponse(TypedDict):
+    """Response from POST /api/auth/reset-password."""
+
+    message: str
+
+
+# ----- Webhooks -----
+
+class Webhook(TypedDict):
+    """A webhook object returned by the webhooks endpoints."""
+
+    id: int
+    url: str
+    event_types: Optional[list]
+    signing_secret: Optional[str]
+    description: Optional[str]
+    created_at: str
+
+
+class WebhookListResponse(TypedDict):
+    """Response from GET /api/v1/webhooks."""
+
+    data: list
+
+
+class WebhookDelivery(TypedDict):
+    """A webhook delivery object returned by the deliveries endpoints."""
+
+    id: int
+    webhook_id: int
+    event_type: str
+    status: str
+    created_at: str
+
+
+class WebhookDeliveryRetryResponse(TypedDict):
+    """Response from POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry."""
+
+    message: str
+
+
+# ----- OAuth -----
+
+class OAuthRefreshResponse(TypedDict):
+    """Response from POST /v1/oauth/connections/{provider}/refresh."""
+
+    provider: str
+    access_token: str
+    expires_at: Optional[str]
+
+
+# ----- Email -----
+
+class EmailSendResponse(TypedDict):
+    """Response from POST /api/email/send."""
+
+    message: str
+    message_id: Optional[str]
