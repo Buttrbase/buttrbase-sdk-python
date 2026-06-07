@@ -34,6 +34,14 @@ from .types import (
     SuperuserResponse,
     UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
+    PasswordResetRequestResponse,
+    PasswordResetResponse,
+    WebhookListResponse,
+    Webhook,
+    WebhookDelivery,
+    WebhookDeliveryRetryResponse,
+    OAuthRefreshResponse,
+    EmailSendResponse,
 )
 
 DEFAULT_BASE_URL = "https://stagingapi.buttrbase.com"
@@ -342,6 +350,103 @@ class ButtrbaseClient:
     def rotate_credential_secret(self, credential_id: str) -> RotateSecretResponse:
         """POST /credentials/{credential_id}/rotate-secret."""
         return self._request("POST", f"/credentials/{credential_id}/rotate-secret")
+
+    # ----- Invite-based registration -----
+    def invite_accept(
+        self,
+        token: str,
+        first_name: str,
+        last_name: str,
+        username: str,
+        password: str,
+        phone: Optional[str] = None,
+    ) -> InviteAcceptResponse:
+        """POST /api/auth/invite/accept — accept an invitation and create a user account.
+
+        No authentication required; the ``token`` argument acts as the credential.
+
+        Returns:
+            An ``InviteAcceptResponse`` dict containing ``user_uuid``, ``org_uuid``,
+            ``role``, ``access_token``, ``refresh_token``, ``token_type``,
+            ``expires_in``, and ``message``.
+        """
+        payload: dict = {
+            "token": token,
+            "first_name": first_name,
+            "last_name": last_name,
+            "username": username,
+            "password": password,
+        }
+        if phone is not None:
+            payload["phone"] = phone
+        return self._request("POST", "/api/auth/invite/accept", json=payload, auth=False)
+
+    def check_org_name(self, name: str) -> OrgCheckResponse:
+        """GET /api/auth/orgs/check — check whether an organisation name is available.
+
+        Returns:
+            An ``OrgCheckResponse`` dict with ``name`` and ``available``.
+        """
+        return self._request(
+            "GET", "/api/auth/orgs/check", params={"name": name}, auth=False
+        )
+
+    def get_superuser_flag(self, email: str) -> SuperuserResponse:
+        """GET /api/auth/superuser — look up the superuser flag for an email address.
+
+        Requires platform-admin authentication.
+
+        Returns:
+            A ``SuperuserResponse`` dict with ``email`` and ``is_superuser``.
+        """
+        return self._request("GET", "/api/auth/superuser", params={"email": email})
+
+    # ----- Contact forms -----
+    def post_contact(
+        self,
+        name: str,
+        email: str,
+        message: str,
+        company: Optional[str] = None,
+        app_id: Optional[str] = None,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact — submit an account / sales enquiry form.
+
+        Returns:
+            A ``ContactSubmitResponse`` dict with ``message`` and ``reference_id``.
+        """
+        payload: dict = {"name": name, "email": email, "message": message}
+        if company is not None:
+            payload["company"] = company
+        if app_id is not None:
+            payload["app_id"] = app_id
+        return self._request("POST", "/api/contact", json=payload, auth=False)
+
+    def post_contact_us(
+        self,
+        name: str,
+        email: str,
+        subject: str,
+        message: str,
+    ) -> ContactSubmitResponse:
+        """POST /api/contact-us — submit a general contact-us form.
+
+        Returns:
+            A ``ContactSubmitResponse`` dict with ``message`` and ``reference_id``.
+        """
+        payload = {"name": name, "email": email, "subject": subject, "message": message}
+        return self._request("POST", "/api/contact-us", json=payload, auth=False)
+
+    # ----- Geo / IP -----
+    def get_client_ip(self) -> GeoResponse:
+        """GET /api/geo/ip — return the caller's IP address and basic geo context.
+
+        Useful during registration for timezone / country pre-fill.
+
+        Returns:
+            A ``GeoResponse`` dict with ``ip``, ``country``, and ``timezone``.
+        """
+        return self._request("GET", "/api/geo/ip", auth=False)
 
     # ----- Sandbox -----
     def reset_sandbox(self, org_uuid: Optional[str] = None) -> SandboxResetResponse:
@@ -1483,3 +1588,144 @@ class ButtrbaseClient:
             f"/api/v1/apps/{app_uuid}/audit-log",
             params=params or None,
         )
+
+    # ----- Password reset -----
+    def request_password_reset(self, email: str) -> PasswordResetRequestResponse:
+        """POST /api/auth/request-password-reset — send a password-reset email.
+
+        No authentication required.
+
+        Returns:
+            A ``PasswordResetRequestResponse`` dict with a ``message`` field.
+        """
+        return self._request(
+            "POST", "/api/auth/request-password-reset", json={"email": email}, auth=False
+        )
+
+    def reset_password(self, token: str, password: str) -> PasswordResetResponse:
+        """POST /api/auth/reset-password — set a new password using a reset token.
+
+        No authentication required; the ``token`` argument acts as the credential.
+
+        Returns:
+            A ``PasswordResetResponse`` dict with a ``message`` field.
+        """
+        return self._request(
+            "POST",
+            "/api/auth/reset-password",
+            json={"token": token, "password": password},
+            auth=False,
+        )
+
+    # ----- Webhooks -----
+    def list_webhooks(self) -> WebhookListResponse:
+        """GET /api/v1/webhooks — list all webhooks for the authenticated account.
+
+        Returns:
+            A ``WebhookListResponse`` dict containing ``data`` (list of webhooks).
+        """
+        return self._request("GET", "/api/v1/webhooks")
+
+    def create_webhook(
+        self,
+        url: str,
+        *,
+        event_types: Optional[list] = None,
+        signing_secret: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> Webhook:
+        """POST /api/v1/webhooks — register a new webhook endpoint.
+
+        Args:
+            url: The HTTPS URL that will receive webhook POST requests.
+            event_types: Optional list of event type strings to subscribe to.
+            signing_secret: Optional secret used to sign webhook payloads.
+            description: Optional human-readable description.
+
+        Returns:
+            A ``Webhook`` dict representing the created webhook.
+        """
+        payload: dict = {"url": url}
+        if event_types is not None:
+            payload["event_types"] = event_types
+        if signing_secret is not None:
+            payload["signing_secret"] = signing_secret
+        if description is not None:
+            payload["description"] = description
+        return self._request("POST", "/api/v1/webhooks", json=payload)
+
+    def delete_webhook(self, webhook_id: int) -> None:
+        """DELETE /api/v1/webhooks/{id} — delete a webhook (HTTP 204, no body)."""
+        self._request("DELETE", f"/api/v1/webhooks/{webhook_id}")
+
+    def list_webhook_deliveries(self, webhook_id: int) -> list:
+        """GET /api/v1/webhooks/{id}/deliveries — list delivery attempts for a webhook.
+
+        Returns:
+            A list of ``WebhookDelivery`` dicts.
+        """
+        return self._request("GET", f"/api/v1/webhooks/{webhook_id}/deliveries")
+
+    def retry_webhook_delivery(
+        self, webhook_id: int, delivery_id: int
+    ) -> WebhookDeliveryRetryResponse:
+        """POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry — retry a delivery.
+
+        Returns:
+            A ``WebhookDeliveryRetryResponse`` dict with a ``message`` field.
+        """
+        return self._request(
+            "POST",
+            f"/api/v1/webhooks/{webhook_id}/deliveries/{delivery_id}/retry",
+        )
+
+    # ----- OAuth -----
+    def refresh_oauth_connection(self, provider: str) -> OAuthRefreshResponse:
+        """POST /v1/oauth/connections/{provider}/refresh — refresh an OAuth token.
+
+        Args:
+            provider: The OAuth provider slug (e.g. ``"google"``, ``"github"``).
+
+        Returns:
+            An ``OAuthRefreshResponse`` dict with ``provider``, ``access_token``,
+            and ``expires_at``.
+        """
+        return self._request(
+            "POST", f"/v1/oauth/connections/{provider}/refresh"
+        )
+
+    # ----- Email -----
+    def send_email(
+        self,
+        to: str,
+        subject: str,
+        *,
+        html_body: Optional[str] = None,
+        text_body: Optional[str] = None,
+        from_address: Optional[str] = None,
+        reply_to: Optional[str] = None,
+    ) -> EmailSendResponse:
+        """POST /api/email/send — send a transactional email.
+
+        Args:
+            to: Recipient email address.
+            subject: Email subject line.
+            html_body: Optional HTML content for the email body.
+            text_body: Optional plain-text content for the email body.
+            from_address: Optional sender address (overrides account default).
+            reply_to: Optional reply-to address.
+
+        Returns:
+            An ``EmailSendResponse`` dict with ``message`` and optionally
+            ``message_id``.
+        """
+        payload: dict = {"to": to, "subject": subject}
+        if html_body is not None:
+            payload["html_body"] = html_body
+        if text_body is not None:
+            payload["text_body"] = text_body
+        if from_address is not None:
+            payload["from_address"] = from_address
+        if reply_to is not None:
+            payload["reply_to"] = reply_to
+        return self._request("POST", "/api/email/send", json=payload)
