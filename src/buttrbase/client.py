@@ -1,6 +1,7 @@
 """ButtrBase API client."""
 from __future__ import annotations
 
+import warnings
 from typing import Any, List, Optional
 
 import requests
@@ -9,17 +10,24 @@ from urllib.parse import urlencode
 
 from .errors import ButtrbaseError
 from .types import (
+    AcceptInvitationResponse,
     ApiKeySummary,
     AppRpConfig,
     AuditRow,
+    CheckOrgNameResponse,
     ContactSubmitResponse,
     CreateApiKeyInput,
     CreateCredentialResponse,
+    CreateInvitationRequest,
     CreateOAuthConfigInput,
     CreatedKeyResponse,
     Credential,
     ExchangeResponse,
+    FinalizeRegistrationRequest,
     GeoResponse,
+    InvitationListItem,
+    InvitationPreview,
+    InvitationResponse,
     InviteAcceptResponse,
     OAuthConfigSummary,
     OrgCheckResponse,
@@ -32,6 +40,7 @@ from .types import (
     RotateSecretResponse,
     SandboxResetResponse,
     SuperuserResponse,
+    TokenPair,
     UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
     PasswordResetRequestResponse,
@@ -468,6 +477,10 @@ class ButtrbaseClient:
     ) -> dict:
         """POST /api/auth/register.
 
+        .. deprecated::
+            Use the 0.3.0 flow instead:
+            ``send_otp_email`` → ``verify_otp_email`` → ``finalize_registration``.
+
         Args:
             email: The new user's email address.
             password: The new user's password.
@@ -479,6 +492,12 @@ class ButtrbaseClient:
             first_name: Optional given name.
             last_name: Optional family name.
         """
+        warnings.warn(
+            "register() is deprecated since 0.3.0. Use send_otp_email() → "
+            "verify_otp_email() → finalize_registration() instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         payload: dict = {
             "email": email,
             "password": password,
@@ -577,6 +596,94 @@ class ButtrbaseClient:
             auth=False,
         )
 
+    # ----- OTP email (0.3.0 registration flow) -----
+
+    def send_otp_email(self, email: str, app_uuid: str) -> None:
+        """POST /api/v1/auth/otp/send — send email OTP for registration.
+
+        Flow: send_otp_email → verify_otp_email → finalize_registration.
+        """
+        self._request("POST", "/api/v1/auth/otp/send",
+                      json={"email": email, "app_uuid": app_uuid}, auth=False)
+
+    def verify_otp_email(self, email: str, otp: str, app_uuid: str) -> TokenPair:
+        """POST /api/v1/auth/otp/verify — verify email OTP.
+
+        Returns a TokenPair; the ``token`` field is the signup_token for
+        finalize_registration.
+        """
+        return self._request(
+            "POST", "/api/v1/auth/otp/verify",
+            json={"email": email, "otp": otp, "app_uuid": app_uuid}, auth=False
+        )
+
+    def check_org_name_v2(self, name: str) -> CheckOrgNameResponse:
+        """POST /api/v1/auth/check-org-name — check org name availability.
+
+        Returns available, normalized form, and reason if unavailable.
+        """
+        return self._request(
+            "POST", "/api/v1/auth/check-org-name",
+            json={"name": name}, auth=False
+        )
+
+    def finalize_registration(self, req: FinalizeRegistrationRequest) -> TokenPair:
+        """POST /api/v1/auth/finalize-registration.
+
+        Complete registration after OTP verification.
+        req["signup_token"] must be the token from verify_otp_email.
+        req["org_choice"] is either {"type": "create", "name": "..."}
+        or {"type": "accept_invite", "invitation_token": "..."}.
+        """
+        return self._request(
+            "POST", "/api/v1/auth/finalize-registration",
+            json=dict(req), auth=False
+        )
+
+    # ----- Invitations (0.3.0+) -----
+
+    def create_invitation(
+        self, org_uuid: str, req: CreateInvitationRequest
+    ) -> InvitationResponse:
+        """POST /api/v1/organizations/{org_uuid}/invitations.
+
+        The plaintext token in the response is shown once.
+        """
+        return self._request(
+            "POST", f"/api/v1/organizations/{org_uuid}/invitations",
+            json=dict(req), auth=True
+        )
+
+    def preview_invitation(self, token: str) -> InvitationPreview:
+        """GET /api/v1/invitations/{token}/preview — public, no auth."""
+        return self._request(
+            "GET", f"/api/v1/invitations/{token}/preview",
+            auth=False
+        )
+
+    def accept_invitation_v2(self, token: str) -> AcceptInvitationResponse:
+        """POST /api/v1/invitations/{token}/accept — for already-authenticated users.
+
+        New users should use finalize_registration with OrgChoice accept_invite.
+        """
+        return self._request(
+            "POST", f"/api/v1/invitations/{token}/accept",
+            auth=True
+        )
+
+    def list_invitations(self, org_uuid: str) -> List[InvitationListItem]:
+        """GET /api/v1/organizations/{org_uuid}/invitations."""
+        return self._request(
+            "GET", f"/api/v1/organizations/{org_uuid}/invitations",
+            auth=True
+        )
+
+    def revoke_invitation(self, org_uuid: str, invitation_id: int) -> None:
+        """DELETE /api/v1/organizations/{org_uuid}/invitations/{invitation_id}."""
+        self._request(
+            "DELETE", f"/api/v1/organizations/{org_uuid}/invitations/{invitation_id}",
+            auth=True
+        )
 
     # ----- MFA (extended) -----
     def mfa_verify(self, code: str) -> dict:
