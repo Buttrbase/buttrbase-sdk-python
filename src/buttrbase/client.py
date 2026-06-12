@@ -37,6 +37,7 @@ from .types import (
     PasskeyRegistrationChallenge,
     PasskeyRegistrationComplete,
     PasskeyRegistrationResult,
+    RegistrationResult,
     RotateSecretResponse,
     SandboxResetResponse,
     SuperuserResponse,
@@ -627,7 +628,7 @@ class ButtrbaseClient:
             json={"name": name}, auth=False
         )
 
-    def finalize_registration(self, req: FinalizeRegistrationRequest) -> TokenPair:
+    def finalize_registration(self, req: FinalizeRegistrationRequest) -> RegistrationResult:
         """POST /api/v1/auth/finalize-registration.
 
         Complete registration after OTP verification.

@@ -30,6 +30,7 @@ from .types import (
     PasskeyRegistrationChallenge,
     PasskeyRegistrationComplete,
     PasskeyRegistrationResult,
+    RegistrationResult,
     RotateSecretResponse,
     SandboxResetResponse,
     TokenPair,
@@ -76,6 +77,7 @@ __all__ = [
     "FinalizeRegistrationRequest",
     "CheckOrgNameResponse",
     "TokenPair",
+    "RegistrationResult",
     # Invitations 0.3.0+
     "CreateInvitationRequest",
     "InvitationResponse",
