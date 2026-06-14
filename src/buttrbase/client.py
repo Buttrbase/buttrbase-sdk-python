@@ -22,6 +22,7 @@ from .types import (
     CreateOAuthConfigInput,
     CreatedKeyResponse,
     Credential,
+    DeviceItem,
     ExchangeResponse,
     FinalizeRegistrationRequest,
     GeoResponse,
@@ -38,9 +39,12 @@ from .types import (
     PasskeyRegistrationComplete,
     PasskeyRegistrationResult,
     RegistrationResult,
+    RevokeDeviceResponse,
     RotateSecretResponse,
     SandboxResetResponse,
+    ScopeContextResponse,
     SuperuserResponse,
+    TenantHome,
     TokenPair,
     UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
@@ -1696,6 +1700,86 @@ class ButtrbaseClient:
             f"/api/v1/apps/{app_uuid}/audit-log",
             params=params or None,
         )
+
+    # ===== Scope context (windowed / JIT scope re-mint) =====
+    def scope_context(self, requested_scopes: List[str]) -> ScopeContextResponse:
+        """POST /api/app/auth/scope-context.
+
+        Re-mint the caller's access token windowed to an explicit,
+        gate-checked scope subset (least-privilege "windowed" strategy).
+        Requires an authenticated end user — the current access token is
+        sent via the ``Authorization`` header. The granted set is always a
+        subset of the caller's effective scopes, and each requested scope is
+        run through the scope-gate (step-up) machinery.
+
+        On success the new access token is stashed onto ``self.api_key`` so
+        subsequent calls use the windowed token, mirroring ``login`` /
+        ``auth_step_up``. Only the access token is re-minted; the refresh
+        token is unchanged and not returned.
+
+        Args:
+            requested_scopes: The explicit scope list to window into a fresh
+                access token. A requested scope the caller does not hold
+                raises ``ButtrbaseError`` (HTTP 403); a scope behind an
+                unsatisfied step-up gate raises ``ButtrbaseError`` (HTTP 401,
+                ``code == "step_up_required"``).
+        """
+        body = self._request(
+            "POST",
+            "/api/app/auth/scope-context",
+            json={"requested_scopes": requested_scopes},
+        )
+        if isinstance(body, dict) and body.get("token"):
+            self.api_key = body["token"]
+        return body
+
+    # ===== Devices (end-user self-service device-key management) =====
+    def list_devices(self) -> List[DeviceItem]:
+        """GET /api/app/devices.
+
+        List the authenticated caller's ACTIVE (non-revoked) device keys, in
+        descending ``created_at`` order. Returns only public-safe fields — no
+        private key material is ever returned. Unwraps the backend's
+        ``{"data": [...]}`` envelope.
+        """
+        resp = self._request("GET", "/api/app/devices")
+        if isinstance(resp, dict) and isinstance(resp.get("data"), list):
+            return resp["data"]
+        return resp if isinstance(resp, list) else []
+
+    def revoke_device(self, device_uuid: str) -> RevokeDeviceResponse:
+        """POST /api/app/devices/{device_uuid}/revoke.
+
+        Soft-revoke a device the caller owns. Ownership is enforced on the
+        backend; a device that does not exist, is already revoked, or belongs
+        to another user yields 404 (raised as ``ButtrbaseError``). Unwraps
+        the backend's ``{"data": {...}}`` envelope.
+        """
+        resp = self._request(
+            "POST", f"/api/app/devices/{device_uuid}/revoke"
+        )
+        return resp.get("data", resp) if isinstance(resp, dict) else resp
+
+    # ===== Tenant home (public discovery) =====
+    def get_tenant_home(
+        self, org_uuid: str, app_id: Optional[int] = None
+    ) -> TenantHome:
+        """GET /api/tenant/home?org_uuid=&app_id=.
+
+        Public, pre-auth discovery: resolve an ACTIVE tenant's home so a
+        client can target it directly. Keyed by ``(org_uuid, app_id)`` and
+        gated on the tenant's lifecycle status — an unknown or non-active
+        tenant yields 404 (raised as ``ButtrbaseError``). Carries public
+        routing info only. Unwraps the backend's ``{"data": {...}}``
+        envelope.
+        """
+        params: dict = {"org_uuid": org_uuid}
+        if app_id is not None:
+            params["app_id"] = app_id
+        resp = self._request(
+            "GET", "/api/tenant/home", params=params, auth=False
+        )
+        return resp.get("data", resp) if isinstance(resp, dict) else resp
 
     # ----- Password reset -----
     def request_password_reset(self, email: str) -> PasswordResetRequestResponse:

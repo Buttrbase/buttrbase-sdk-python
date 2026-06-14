@@ -14,6 +14,7 @@ from .types import (
     CreateOAuthConfigInput,
     CreatedKeyResponse,
     Credential,
+    DeviceItem,
     ExchangeResponse,
     ExpiryInput,
     FinalizeRegistrationRequest,
@@ -31,8 +32,11 @@ from .types import (
     PasskeyRegistrationComplete,
     PasskeyRegistrationResult,
     RegistrationResult,
+    RevokeDeviceResponse,
     RotateSecretResponse,
     SandboxResetResponse,
+    ScopeContextResponse,
+    TenantHome,
     TokenPair,
     UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
@@ -70,6 +74,13 @@ __all__ = [
     "PasskeyAuthChallenge",
     "PasskeyAuthComplete",
     "PasskeyListItem",
+    # Scope context (windowed / JIT scope re-mint)
+    "ScopeContextResponse",
+    # Devices (end-user self-service)
+    "DeviceItem",
+    "RevokeDeviceResponse",
+    # Tenant home (public discovery)
+    "TenantHome",
     # Registration 0.3.0+
     "OrgChoiceCreate",
     "OrgChoiceAcceptInvite",
