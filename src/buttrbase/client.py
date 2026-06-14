@@ -153,39 +153,38 @@ class ButtrbaseClient:
     def send_magic_link(
         self,
         email: str,
-        app_uuid: str,
+        *,
         org_uuid: Optional[str] = None,
         redirect_to: Optional[str] = None,
+        app_uuid: Optional[str] = None,
     ) -> dict:
         """POST /api/auth/magic-link/send.
 
         Args:
             email: The recipient's email address.
-            app_uuid: UUID of the target app (string-formatted UUID). This
-                replaced the legacy ``app`` slug parameter. Example:
-                ``"018f1234-5678-7000-8000-000000000001"``.
-            org_uuid: Optional org scope.
+            org_uuid: Optional org scope the magic link is issued for.
             redirect_to: Optional URL the user lands on after clicking.
+            app_uuid: Optional target-app UUID (string-formatted).
         """
-        payload: dict = {"email": email, "app_uuid": app_uuid}
+        payload: dict = {"email": email}
         if org_uuid is not None:
             payload["org_uuid"] = org_uuid
         if redirect_to is not None:
             payload["redirect_to"] = redirect_to
+        if app_uuid is not None:
+            payload["app_uuid"] = app_uuid
         return self._request("POST", "/api/auth/magic-link/send", json=payload, auth=False)
 
-    def verify_magic_link(self, token: str, app_uuid: str) -> dict:
-        """POST /api/v1/auth/magic-link/verify.
+    def verify_magic_link(self, token: str) -> dict:
+        """POST /api/auth/magic-link/verify.
 
         Args:
             token: The single-use token from the magic-link email.
-            app_uuid: UUID of the target app (string-formatted UUID).
-                Replaced the legacy ``app`` slug parameter.
         """
         return self._request(
             "POST",
-            "/api/v1/auth/magic-link/verify",
-            json={"token": token, "app_uuid": app_uuid},
+            "/api/auth/magic-link/verify",
+            json={"token": token},
             auth=False,
         )
 
