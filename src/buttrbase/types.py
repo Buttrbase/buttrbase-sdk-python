@@ -1,7 +1,7 @@
 """Type definitions for the ButtrBase SDK."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 try:
     from typing import TypedDict
@@ -430,3 +430,194 @@ class TenantHome(TypedDict):
     tenancy_mode: str
     home_region: Optional[str]
     home_base_url: Optional[str]
+
+
+# ----- Password reset -----
+
+class PasswordResetRequestResponse(TypedDict):
+    """Response from POST /api/auth/request-password-reset."""
+
+    message: str
+
+
+class PasswordResetResponse(TypedDict):
+    """Response from POST /api/auth/reset-password."""
+
+    message: str
+
+
+# ----- Webhooks -----
+
+class Webhook(TypedDict):
+    """A webhook object returned by the webhooks endpoints."""
+
+    id: int
+    url: str
+    event_types: Optional[list]
+    signing_secret: Optional[str]
+    description: Optional[str]
+    created_at: str
+
+
+class WebhookListResponse(TypedDict):
+    """Response from GET /api/v1/webhooks."""
+
+    data: list
+
+
+class WebhookDelivery(TypedDict):
+    """A webhook delivery object returned by the deliveries endpoints."""
+
+    id: int
+    webhook_id: int
+    event_type: str
+    status: str
+    created_at: str
+
+
+class WebhookDeliveryRetryResponse(TypedDict):
+    """Response from POST /api/v1/webhooks/{id}/deliveries/{delivery_id}/retry."""
+
+    message: str
+
+
+# ----- OAuth -----
+
+class OAuthRefreshResponse(TypedDict):
+    """Response from POST /v1/oauth/connections/{provider}/refresh."""
+
+    provider: str
+    access_token: str
+    expires_at: Optional[str]
+
+
+# ----- Email -----
+
+class EmailSendResponse(TypedDict):
+    """Response from POST /api/email/send."""
+
+    message: str
+    message_id: Optional[str]
+
+
+# ── Registration 0.3.0+ ──────────────────────────────────────────────────────
+
+
+class OrgChoiceCreate(TypedDict):
+    """Org choice for creating a new organisation during finalize_registration."""
+
+    type: Literal["create"]
+    name: str
+
+
+class OrgChoiceAcceptInvite(TypedDict):
+    """Org choice for accepting an invitation during finalize_registration."""
+
+    type: Literal["accept_invite"]
+    invitation_token: str
+
+
+OrgChoice = Union[OrgChoiceCreate, OrgChoiceAcceptInvite]
+
+
+class FinalizeRegistrationRequest(TypedDict, total=False):
+    """Body for POST /api/v1/auth/finalize-registration.
+
+    ``email``, ``password``, ``app_uuid``, ``signup_token``, and
+    ``org_choice`` are all required. ``first_name`` and ``last_name``
+    are optional.
+    """
+
+    email: str           # required
+    password: str        # required
+    app_uuid: str        # required (UUID string)
+    signup_token: str    # required — token from verify_otp_email
+    org_choice: OrgChoice  # required
+    first_name: str      # optional
+    last_name: str       # optional
+
+
+class CheckOrgNameResponse(TypedDict):
+    """Response from POST /api/v1/auth/check-org-name."""
+
+    available: bool
+    reason: Optional[str]
+    normalized: str
+
+
+class TokenPair(TypedDict):
+    """A token pair returned by OTP-verification and finalize-registration."""
+
+    token: str
+    refresh_token: Optional[str]
+    user_uuid: Optional[str]
+
+
+class RegistrationResult(TypedDict):
+    """Full response from finalize_registration and register."""
+
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: Optional[int]
+    user_uuid: str
+    org_uuid: str
+    role: str
+    message: Optional[str]
+
+
+# ── Invitations ──────────────────────────────────────────────────────────────
+
+
+class CreateInvitationRequest(TypedDict, total=False):
+    """Body for POST /api/v1/organizations/{org_uuid}/invitations."""
+
+    email: str
+    role: str
+    expires_in_hours: int
+
+
+class InvitationResponse(TypedDict):
+    """Response from POST /api/v1/organizations/{org_uuid}/invitations.
+
+    The plaintext ``token`` is shown once — the server does not store it.
+    """
+
+    id: int
+    org_uuid: str
+    email: Optional[str]
+    role: str
+    expires_at: str
+    token: str
+    signup_url: str
+
+
+class InvitationPreview(TypedDict):
+    """Response from GET /api/v1/invitations/{token}/preview."""
+
+    org_uuid: str
+    org_name: str
+    email: Optional[str]
+    role: str
+    expires_at: str
+    valid: bool
+    invalid_reason: Optional[str]
+
+
+class AcceptInvitationResponse(TypedDict):
+    """Response from POST /api/v1/invitations/{token}/accept."""
+
+    org_uuid: str
+    org_name: str
+    role: str
+
+
+class InvitationListItem(TypedDict):
+    """A row from GET /api/v1/organizations/{org_uuid}/invitations."""
+
+    id: int
+    email: Optional[str]
+    role: str
+    expires_at: str
+    accepted_at: Optional[str]
+    revoked_at: Optional[str]
