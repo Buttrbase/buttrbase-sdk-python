@@ -353,3 +353,80 @@ class PasskeyListItem(TypedDict):
     nickname: Optional[str]
     last_used_at: Optional[str]
     created_at: str
+
+
+# ---------------------------------------------------------------------------
+# Scope context (windowed / JIT scope re-mint)
+# ---------------------------------------------------------------------------
+
+
+class ScopeContextResponse(TypedDict):
+    """Response from POST /api/app/auth/scope-context.
+
+    The endpoint re-mints the caller's access token windowed to an explicit,
+    gate-checked scope subset (least-privilege "windowed" strategy). Only the
+    access token is re-minted — the refresh token is unchanged and not
+    returned.
+
+    ``token`` is the new access JWT; ``scopes`` is the granted (sorted,
+    de-duplicated) subset actually embedded in it — always a subset of the
+    caller's effective scopes. The granted set may differ from the request if
+    duplicates were collapsed.
+
+    Note: the access token's expiry is carried inside the JWT's ``exp`` claim
+    (per the tenant's token policy); the endpoint does not return a separate
+    expiry field. A requested scope the caller lacks yields HTTP 403; a scope
+    behind an unsatisfied step-up gate yields HTTP 401 with
+    ``{"error": "step_up_required", "scope": ..., "factor": ...}``.
+    """
+
+    token: str
+    scopes: List[str]
+
+
+# ---------------------------------------------------------------------------
+# Devices (end-user self-service device-key management)
+# ---------------------------------------------------------------------------
+
+
+class DeviceItem(TypedDict):
+    """A single device row from GET /api/app/devices.
+
+    Public-safe view of a registered device key — no private key material is
+    ever returned. ``jkt`` is the JWK SHA-256 thumbprint of the device's
+    public key (RFC 7638). Timestamps are RFC 3339 strings; ``last_seen_at``
+    is ``None`` for a device that has not yet been seen on a bound request.
+    """
+
+    device_uuid: str
+    jkt: str
+    label: Optional[str]
+    created_at: str
+    last_seen_at: Optional[str]
+
+
+class RevokeDeviceResponse(TypedDict):
+    """Response from POST /api/app/devices/{device_uuid}/revoke."""
+
+    device_uuid: str
+    revoked: bool
+
+
+# ---------------------------------------------------------------------------
+# Tenant home (public discovery)
+# ---------------------------------------------------------------------------
+
+
+class TenantHome(TypedDict):
+    """Public routing info from GET /api/tenant/home.
+
+    Returned ONLY for an ACTIVE tenant keyed by ``(org_uuid, app_id)``;
+    unknown or non-active tenants yield HTTP 404. Carries public routing
+    info only — no secrets, no infra pointers. ``home_region`` and
+    ``home_base_url`` are ``None`` when the tenant has no region/home
+    override.
+    """
+
+    tenancy_mode: str
+    home_region: Optional[str]
+    home_base_url: Optional[str]
