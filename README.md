@@ -504,6 +504,29 @@ key_events = client.read_audit_log(
 )
 ```
 
+## Zero Trust: Scope Context, Devices & Tenant Discovery
+
+Client-facing endpoints for windowed scope re-mint, self-service device-key
+management, and public tenant-home discovery.
+
+```python
+# Windowed / JIT scope re-mint. Requires an authenticated end user; the new
+# access token is stashed back onto the client. A scope you don't hold -> 403;
+# a scope behind a step-up gate -> 401 (code == "step_up_required").
+resp = client.scope_context(["billing:read", "billing:write"])
+print(resp["token"], resp["scopes"])  # granted (sorted) subset
+
+# List & revoke the caller's own device keys (no key material returned).
+devices = client.list_devices()
+for d in devices:
+    print(d["device_uuid"], d["jkt"], d["last_seen_at"])
+client.revoke_device("device-uuid")
+
+# Public pre-auth discovery: resolve an ACTIVE tenant's home (404 otherwise).
+home = client.get_tenant_home("org-uuid", app_id=42)
+print(home["tenancy_mode"], home["home_region"], home["home_base_url"])
+```
+
 ## Recipes
 
 ### Complete Onboarding
