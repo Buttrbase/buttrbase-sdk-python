@@ -1015,7 +1015,8 @@ class TestGeoEndpoints:
         assert result["country"] == "US"
 
     def test_get_client_ip_error(self):
-        with self._patch() as mock_req:
+        # 503 is retryable; patch sleep so the retries don't slow the suite.
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep"):
             mock_req.return_value = _make_response(503, {"message": "service unavailable"})
             with pytest.raises(ButtrbaseError):
                 self.client.get_client_ip()
@@ -1053,6 +1054,82 @@ class TestSandboxEndpoints:
             mock_req.return_value = _make_response(403, {"message": "forbidden"})
             with pytest.raises(ButtrbaseError):
                 self.client.reset_sandbox()
+
+
+# ---------------------------------------------------------------------------
+# Retry strategy
+# ---------------------------------------------------------------------------
+
+class TestRetryStrategy:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_503_then_200_succeeds_after_retry(self):
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep") as sleep:
+            mock_req.side_effect = [
+                _make_response(503, {"message": "cold start"}),
+                _make_response(200, {"ok": True}),
+            ]
+            result = self.client.validate_coupon("PROMO10")
+        assert result == {"ok": True}
+        assert mock_req.call_count == 2
+        # Backoff slept once between the two attempts.
+        assert sleep.call_count == 1
+
+    def test_400_does_not_retry(self):
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep") as sleep:
+            mock_req.return_value = _make_response(400, {"message": "bad"})
+            with pytest.raises(ButtrbaseError) as exc_info:
+                self.client.validate_coupon("BAD")
+        assert exc_info.value.status_code == 400
+        assert mock_req.call_count == 1
+        sleep.assert_not_called()
+
+    def test_connection_error_retries_then_succeeds(self):
+        import requests as _requests
+
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep"):
+            mock_req.side_effect = [
+                _requests.exceptions.ConnectionError("boom"),
+                _make_response(200, {"ok": True}),
+            ]
+            result = self.client.validate_coupon("X")
+        assert result == {"ok": True}
+        assert mock_req.call_count == 2
+
+    def test_exhausts_retries_and_raises(self):
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep"):
+            mock_req.return_value = _make_response(502, {"message": "gateway"})
+            with pytest.raises(ButtrbaseError) as exc_info:
+                self.client.validate_coupon("X")
+        assert exc_info.value.status_code == 502
+        # 1 initial + 3 retries (default max_retries=3) = 4 attempts.
+        assert mock_req.call_count == 4
+
+    def test_max_retries_zero_disables(self):
+        client = ButtrbaseClient(
+            api_key="k", base_url="https://example.com", max_retries=0
+        )
+        with patch.object(client._session, "request") as mock_req, \
+                patch("buttrbase.client.time.sleep") as sleep:
+            mock_req.return_value = _make_response(503, {"message": "down"})
+            with pytest.raises(ButtrbaseError):
+                client.validate_coupon("X")
+        assert mock_req.call_count == 1
+        sleep.assert_not_called()
+
+    def test_retry_after_header_honored(self):
+        with self._patch() as mock_req, patch("buttrbase.client.time.sleep") as sleep:
+            resp_503 = _make_response(503, {"message": "wait"})
+            resp_503.headers = {"Retry-After": "2"}
+            mock_req.side_effect = [resp_503, _make_response(200, {"ok": True})]
+            result = self.client.validate_coupon("X")
+        assert result == {"ok": True}
+        # Retry-After: 2 seconds should be slept exactly.
+        sleep.assert_called_once_with(2.0)
 
 
 # ---------------------------------------------------------------------------
