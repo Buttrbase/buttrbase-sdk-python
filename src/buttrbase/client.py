@@ -1,6 +1,9 @@
 """ButtrBase API client."""
 from __future__ import annotations
 
+import email.utils
+import random
+import time
 import warnings
 from typing import Any, List, Optional
 
@@ -60,6 +63,21 @@ from .types import (
 
 DEFAULT_BASE_URL = "https://stagingapi.buttrbase.com"
 
+# HTTP statuses that are safe to retry. 502/503/504 are emitted by the gateway
+# when the backend (which can scale to zero) has not processed the request —
+# safe to replay for any method, including POST. 429 is rate limiting.
+RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
+
+# Network-level failures where the request likely never reached / was answered
+# by the app, so a replay is safe.
+RETRYABLE_EXCEPTIONS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+)
+
+# Hard ceiling on a single backoff sleep, regardless of base/attempt.
+_MAX_BACKOFF = 4.0
+
 
 class ButtrbaseClient:
     """Small synchronous client for the ButtrBase API."""
@@ -69,10 +87,14 @@ class ButtrbaseClient:
         api_key: str,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 10.0,
+        max_retries: int = 3,
+        retry_base_delay: float = 0.5,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
+        self.max_retries = max_retries
+        self.retry_base_delay = retry_base_delay
         self._session = requests.Session()
 
     # ----- internal -----
@@ -92,15 +114,79 @@ class ButtrbaseClient:
         auth: bool = True,
     ) -> Any:
         url = f"{self.base_url}{path}"
-        resp = self._session.request(
-            method,
-            url,
-            json=json,
-            params=params,
-            headers=self._headers(auth=auth),
-            timeout=self.timeout,
-        )
-        return self._handle(resp)
+        # Total attempts = 1 initial try + ``max_retries`` retries.
+        # ``max_retries=0`` disables retrying entirely.
+        attempts = max(0, self.max_retries) + 1
+        last_exc: Optional[BaseException] = None
+        for attempt in range(attempts):
+            is_last = attempt == attempts - 1
+            try:
+                resp = self._session.request(
+                    method,
+                    url,
+                    json=json,
+                    params=params,
+                    headers=self._headers(auth=auth),
+                    timeout=self.timeout,
+                )
+            except RETRYABLE_EXCEPTIONS as exc:
+                # Connection/timeout: app didn't answer, replay is safe.
+                if is_last:
+                    raise
+                last_exc = exc
+                self._sleep_before_retry(attempt, retry_after=None)
+                continue
+
+            if not is_last and resp.status_code in RETRYABLE_STATUS_CODES:
+                self._sleep_before_retry(
+                    attempt,
+                    retry_after=resp.headers.get("Retry-After"),
+                )
+                continue
+
+            return self._handle(resp)
+
+        # Unreachable in practice: the loop either returns or re-raises on the
+        # final attempt. Guard anyway for completeness.
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError("retry loop exited without a response")
+
+    def _sleep_before_retry(
+        self, attempt: int, retry_after: Optional[str]
+    ) -> None:
+        """Sleep before the next retry using exponential backoff with jitter.
+
+        Honors a ``Retry-After`` header (delay-seconds or HTTP-date) when the
+        server supplies one; otherwise uses ``retry_base_delay * 2**attempt``
+        with full jitter, capped at ``_MAX_BACKOFF``.
+        """
+        delay = self._retry_after_seconds(retry_after)
+        if delay is None:
+            backoff = self.retry_base_delay * (2 ** attempt)
+            backoff = min(backoff, _MAX_BACKOFF)
+            delay = random.uniform(0, backoff)
+        time.sleep(delay)
+
+    @staticmethod
+    def _retry_after_seconds(value: Optional[str]) -> Optional[float]:
+        """Parse a ``Retry-After`` header into seconds, or None if absent/bad."""
+        if not isinstance(value, str) or not value.strip():
+            return None
+        value = value.strip()
+        try:
+            return max(0.0, float(value))
+        except ValueError:
+            pass
+        # HTTP-date form, e.g. "Wed, 21 Oct 2015 07:28:00 GMT".
+        try:
+            parsed = email.utils.parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed is None:
+            return None
+        delta = parsed.timestamp() - time.time()
+        return max(0.0, delta)
 
     @staticmethod
     def _handle(resp: requests.Response) -> Any:
