@@ -17,10 +17,11 @@ pip install buttrbase
 ```python
 from buttrbase import ButtrbaseClient
 
-# App-server callers authenticate with an OAuth2 client-credentials
-# access token (see "App Authentication" below). End-user flows can start
-# from an anonymous client and let login() stash the user token.
-client = ButtrbaseClient(access_token="<oauth2-access-token>")
+# App-server callers authenticate with an OAuth2 client-credentials pair
+# (see "App Authentication" below). Construct with client_id/client_secret
+# and the SDK fetches + refreshes the access token for you. End-user flows
+# can start from an anonymous client and let login() stash the user token.
+client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
 
 # Login — app_uuid is required (the UUID for your app on ButtrBase)
 resp = client.login(
@@ -62,12 +63,24 @@ cred = client.get_credential(created["credentials_id"])
 client.delete_credential(created["credentials_id"])
 ```
 
-Exchange the `client_id` + `client_secret` for an access token at your
-deployment's OAuth2 token endpoint, then construct the client with it:
+Construct the client with the pair and the SDK handles the token grant for
+you — it exchanges `client_id` + `client_secret` at
+`POST /api/v1/auth/token` lazily before the first authenticated request,
+caches the resulting bearer, and refreshes it (slightly early) when it
+expires:
 
 ```python
-client = ButtrbaseClient(access_token="<oauth2-access-token>")
+client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
+
+# The first authed call transparently fetches a token; later calls reuse it.
+profile = client.get_profile()
+
+# Optional: fetch a token eagerly (e.g. to fail fast on bad credentials).
+client.authenticate()
 ```
+
+You can still pass `access_token="<token>"` directly if you obtain one out
+of band; in that case the SDK uses it as-is.
 
 ## Authentication
 
@@ -515,7 +528,7 @@ print(home["tenancy_mode"], home["home_region"], home["home_base_url"])
 ```python
 from buttrbase import ButtrbaseClient
 
-client = ButtrbaseClient(access_token="<oauth2-access-token>")
+client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
 APP_UUID = "018f1234-5678-7000-8000-000000000001"
 
 # 1. Register and login
@@ -551,13 +564,14 @@ created = admin.create_credential("prod-srv")
 CLIENT_ID = created["client_id"]
 CLIENT_SECRET = created["client_secret"]  # save this — shown once
 
-# 2. On boot, your server exchanges client_id + client_secret for an
-#    access token at your deployment's OAuth2 token endpoint, then:
-client = ButtrbaseClient(access_token="<oauth2-access-token>")
+# 2. Construct your server's client with the pair. The SDK runs the
+#    client-credentials grant (POST /api/v1/auth/token) for you: it fetches
+#    a token lazily before the first authed call, caches it, and refreshes
+#    it automatically (slightly early) when it expires.
+client = ButtrbaseClient(client_id=CLIENT_ID, client_secret=CLIENT_SECRET)
 
-# 3. Re-fetch a fresh access token from the token endpoint before the
-#    current one expires and update the client:
-client.access_token = "<new-oauth2-access-token>"
+# 3. Just make calls — no manual token management needed.
+profile = client.get_profile()
 ```
 
 ### Registering a Social Login Provider

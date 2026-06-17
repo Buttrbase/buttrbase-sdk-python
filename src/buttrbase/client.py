@@ -85,6 +85,8 @@ class ButtrbaseClient:
         timeout: float = 10.0,
         max_retries: int = 3,
         retry_base_delay: float = 0.5,
+        client_id: str = "",
+        client_secret: str = "",
     ) -> None:
         """Create a client.
 
@@ -95,17 +97,31 @@ class ButtrbaseClient:
                 end-user flows it is the JWT returned by ``login`` and
                 friends (those methods stash the new token here
                 automatically). Pass ``""`` (the default) for an anonymous
-                client used only for public / pre-auth endpoints.
+                client, or supply ``client_id`` / ``client_secret`` to have
+                the SDK fetch one for you on first use.
             base_url: The API base URL.
             timeout: Per-request timeout in seconds.
             max_retries: Number of retries on retryable failures.
             retry_base_delay: Base delay for exponential backoff.
+            client_id: OAuth2 client-credentials client id. With
+                ``client_secret``, the SDK exchanges these for an access
+                token via :meth:`authenticate` — lazily before the first
+                authed request and again when the cached token nears expiry.
+            client_secret: OAuth2 client-credentials secret. See
+                ``client_id``.
         """
         self.access_token = access_token
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_base_delay = retry_base_delay
+        self.client_id = client_id
+        self.client_secret = client_secret
+        # Expiry (epoch seconds) of a token obtained via the
+        # client-credentials grant. ``None`` means the current token is not
+        # managed by the SDK (passed in directly, or a user JWT stashed by
+        # ``login``) and so is never proactively refreshed.
+        self._token_expires_at: Optional[float] = None
         self._session = requests.Session()
 
     # ----- internal -----
@@ -114,6 +130,27 @@ class ButtrbaseClient:
         if auth and self.access_token:
             h["Authorization"] = f"Bearer {self.access_token}"
         return h
+
+    def _ensure_token(self) -> None:
+        """Lazily obtain / refresh a client-credentials access token.
+
+        No-op unless both ``client_id`` and ``client_secret`` are set. A new
+        token is fetched when none is cached or when the managed token is
+        at/near expiry. Tokens not minted by this grant (passed in directly,
+        or user JWTs from ``login``) carry no tracked expiry and are left
+        untouched.
+        """
+        if not (self.client_id and self.client_secret):
+            return
+        if self.access_token and not self._token_expired():
+            return
+        self.authenticate()
+
+    def _token_expired(self) -> bool:
+        """True once the managed token has reached its (early) expiry mark."""
+        if self._token_expires_at is None:
+            return False
+        return time.time() >= self._token_expires_at
 
     def _request(
         self,
@@ -124,6 +161,10 @@ class ButtrbaseClient:
         params: Optional[dict] = None,
         auth: bool = True,
     ) -> Any:
+        if auth:
+            # Lazily fetch / refresh a client-credentials token when one is
+            # configured, before sending an authenticated request.
+            self._ensure_token()
         url = f"{self.base_url}{path}"
         # Total attempts = 1 initial try + ``max_retries`` retries.
         # ``max_retries=0`` disables retrying entirely.
@@ -337,6 +378,9 @@ class ButtrbaseClient:
         body = self._request("POST", "/api/auth/step-up", json=payload)
         if isinstance(body, dict) and body.get("access_token"):
             self.access_token = body["access_token"]
+            # User/step-up token, not a client-credentials grant — don't
+            # proactively refresh it.
+            self._token_expires_at = None
         return body
 
     # ----- JIT elevation (admin) -----
@@ -567,6 +611,66 @@ class ButtrbaseClient:
         return self._request("POST", "/api/sandbox/reset", json=payload or None)
 
     # ----- Auth -----
+    # How early (in seconds) to refresh a client-credentials token before it
+    # actually expires, so an in-flight request never races the boundary.
+    _TOKEN_REFRESH_SKEW = 30.0
+
+    def authenticate(self) -> dict:
+        """POST /api/v1/auth/token — OAuth2 client-credentials grant.
+
+        Exchanges the configured ``client_id`` / ``client_secret`` for an
+        access token and stores it on ``self.access_token`` (and tracks its
+        expiry) so subsequent authed requests carry the bearer. Normally you
+        do not call this directly — authed methods fetch and refresh the
+        token lazily — but it is exposed for eager warm-up / verification.
+
+        Returns:
+            The token response dict (``access_token``, ``token_type``,
+            ``expires_in``).
+
+        Raises:
+            ButtrbaseError: On non-2xx (e.g. 401 ``invalid client
+                credentials``).
+            ValueError: If ``client_id`` / ``client_secret`` are not set.
+        """
+        if not (self.client_id and self.client_secret):
+            raise ValueError(
+                "authenticate() requires client_id and client_secret"
+            )
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+        }
+        # Use the raw session: this is an unauthenticated POST, and routing it
+        # through _request would re-enter _ensure_token and recurse.
+        requested_at = time.time()
+        resp = self._session.post(
+            f"{self.base_url}/api/v1/auth/token",
+            json=payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=self.timeout,
+        )
+        body = self._handle(resp)
+        token = body.get("access_token") if isinstance(body, dict) else None
+        if not token:
+            raise ButtrbaseError(
+                "token endpoint returned no access_token",
+                status_code=resp.status_code,
+                detail=body,
+            )
+        self.access_token = token
+        expires_in = body.get("expires_in") if isinstance(body, dict) else None
+        if isinstance(expires_in, (int, float)) and expires_in > 0:
+            self._token_expires_at = (
+                requested_at + float(expires_in) - self._TOKEN_REFRESH_SKEW
+            )
+        else:
+            # No usable lifetime hint: keep the token but don't proactively
+            # refresh it (treat as long-lived).
+            self._token_expires_at = None
+        return body
+
     def register(
         self,
         email: str,
@@ -630,6 +734,8 @@ class ButtrbaseClient:
         body = self._request("POST", "/api/auth/login", json=payload, auth=False)
         if isinstance(body, dict) and body.get("access_token"):
             self.access_token = body["access_token"]
+            # User JWT, not a client-credentials grant — don't refresh it.
+            self._token_expires_at = None
         return body
 
     def lookup_organizations(self, email: str, app_uuid: str) -> dict:
@@ -1748,6 +1854,8 @@ class ButtrbaseClient:
         )
         if isinstance(body, dict) and body.get("token"):
             self.access_token = body["token"]
+            # Windowed user token, not a client-credentials grant.
+            self._token_expires_at = None
         return body
 
     # ===== Devices (end-user self-service device-key management) =====

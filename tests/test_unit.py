@@ -169,6 +169,141 @@ class TestHeaders:
 
 
 # ---------------------------------------------------------------------------
+# Client-credentials token grant (authenticate / lazy fetch / refresh)
+# ---------------------------------------------------------------------------
+
+class TestClientCredentialsGrant:
+    def _client(self) -> ButtrbaseClient:
+        return ButtrbaseClient(
+            base_url="https://example.com",
+            timeout=5.0,
+            client_id="cid",
+            client_secret="csecret",
+        )
+
+    def test_authenticate_sets_bearer(self):
+        client = self._client()
+        with patch.object(client._session, "post") as mock_post:
+            mock_post.return_value = _make_response(
+                200,
+                {"access_token": "jwt-1", "token_type": "Bearer", "expires_in": 3600},
+            )
+            body = client.authenticate()
+        # Hits the token endpoint with the client-credentials grant body.
+        assert mock_post.call_args[0][0] == "https://example.com/api/v1/auth/token"
+        assert mock_post.call_args[1]["json"] == {
+            "grant_type": "client_credentials",
+            "client_id": "cid",
+            "client_secret": "csecret",
+        }
+        assert body["access_token"] == "jwt-1"
+        # Bearer is stored for subsequent requests.
+        assert client.access_token == "jwt-1"
+        assert client._headers(auth=True)["Authorization"] == "Bearer jwt-1"
+
+    def test_authenticate_bad_credentials_raises(self):
+        client = self._client()
+        with patch.object(client._session, "post") as mock_post:
+            mock_post.return_value = _make_response(
+                401, {"error": "invalid client credentials"}
+            )
+            with pytest.raises(ButtrbaseError) as exc_info:
+                client.authenticate()
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.code == "invalid client credentials"
+        assert client.access_token == ""
+
+    def test_authenticate_requires_credentials(self):
+        client = ButtrbaseClient(base_url="https://example.com")
+        with pytest.raises(ValueError):
+            client.authenticate()
+
+    def test_lazy_fetch_before_first_authed_request(self):
+        client = self._client()
+        with patch.object(client._session, "post") as mock_post, \
+                patch.object(client._session, "request") as mock_req:
+            mock_post.return_value = _make_response(
+                200,
+                {"access_token": "jwt-1", "token_type": "Bearer", "expires_in": 3600},
+            )
+            mock_req.return_value = _make_response(200, {"ok": True})
+            # No token set yet — the authed call should trigger a token fetch.
+            result = client.get_profile()
+        assert result == {"ok": True}
+        assert mock_post.call_count == 1
+        # The authed request carried the freshly-minted bearer.
+        sent_headers = mock_req.call_args[1]["headers"]
+        assert sent_headers["Authorization"] == "Bearer jwt-1"
+
+    def test_token_reused_across_requests(self):
+        client = self._client()
+        with patch.object(client._session, "post") as mock_post, \
+                patch.object(client._session, "request") as mock_req:
+            mock_post.return_value = _make_response(
+                200,
+                {"access_token": "jwt-1", "token_type": "Bearer", "expires_in": 3600},
+            )
+            mock_req.return_value = _make_response(200, {"ok": True})
+            client.get_profile()
+            client.get_profile()
+            client.list_users()
+        # Token fetched once, reused for all three authed calls.
+        assert mock_post.call_count == 1
+        assert mock_req.call_count == 3
+
+    def test_token_refreshed_on_expiry(self):
+        client = self._client()
+        with patch.object(client._session, "post") as mock_post, \
+                patch.object(client._session, "request") as mock_req:
+            mock_post.side_effect = [
+                _make_response(
+                    200,
+                    {"access_token": "jwt-1", "token_type": "Bearer", "expires_in": 3600},
+                ),
+                _make_response(
+                    200,
+                    {"access_token": "jwt-2", "token_type": "Bearer", "expires_in": 3600},
+                ),
+            ]
+            mock_req.return_value = _make_response(200, {"ok": True})
+            client.get_profile()
+            assert client.access_token == "jwt-1"
+            # Force the cached token past its (early) expiry mark.
+            client._token_expires_at = time.time() - 1
+            client.get_profile()
+        # A second token was minted and is now in use.
+        assert mock_post.call_count == 2
+        assert client.access_token == "jwt-2"
+        last_headers = mock_req.call_args[1]["headers"]
+        assert last_headers["Authorization"] == "Bearer jwt-2"
+
+    def test_explicit_access_token_skips_grant(self):
+        client = ButtrbaseClient(
+            access_token="preset",
+            base_url="https://example.com",
+            client_id="cid",
+            client_secret="csecret",
+        )
+        with patch.object(client._session, "post") as mock_post, \
+                patch.object(client._session, "request") as mock_req:
+            mock_req.return_value = _make_response(200, {"ok": True})
+            client.get_profile()
+        # A preset token (no tracked expiry) is used as-is; no grant call.
+        mock_post.assert_not_called()
+        assert mock_req.call_args[1]["headers"]["Authorization"] == "Bearer preset"
+
+    def test_no_credentials_no_lazy_fetch(self):
+        client = ButtrbaseClient(base_url="https://example.com")
+        with patch.object(client._session, "post") as mock_post, \
+                patch.object(client._session, "request") as mock_req:
+            mock_req.return_value = _make_response(200, {"ok": True})
+            client.get_profile()
+        # Anonymous client with no credentials: no grant, no auth header.
+        mock_post.assert_not_called()
+        assert "Authorization" not in mock_req.call_args[1]["headers"]
+
+
+# ---------------------------------------------------------------------------
 # Coupon endpoints
 # ---------------------------------------------------------------------------
 

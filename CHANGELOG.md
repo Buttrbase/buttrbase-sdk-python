@@ -16,13 +16,19 @@
 - Removed types: `ExchangeResponse`, `ApiKeySummary`, `CreatedKeyResponse`,
   `CreateApiKeyInput`, `ExpiryInput`.
 
+### Added
+- `ButtrbaseClient(client_id=..., client_secret=...)` and an
+  `authenticate()` method implementing the OAuth2 client-credentials grant
+  (`POST /api/v1/auth/token`). Construct the client with the pair and authed
+  calls work end-to-end: the SDK fetches an access token lazily before the
+  first authenticated request, caches it as the bearer, and refreshes it
+  (slightly early, using `expires_in`) when it expires. Passing
+  `access_token=...` directly is still supported.
+
 ### Notes
 - Manage client-credentials via the existing `/credentials` endpoints
   (`create_credential`, `rotate_credential_secret`, `list_credentials`,
-  `get_credential`, `delete_credential`). Exchange `client_id` +
-  `client_secret` for an access token at your deployment's OAuth2 token
-  endpoint, then pass it as `access_token`. The SDK does not yet expose a
-  client-credentials token-grant method (no backend contract assumed here).
+  `get_credential`, `delete_credential`).
 
 ## Unreleased — app_uuid migration
 
