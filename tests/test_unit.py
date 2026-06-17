@@ -35,8 +35,8 @@ def _make_response(status_code: int, body: Any = None, content: bytes = b"{}") -
     return resp
 
 
-def _make_client(api_key: str = "test-key") -> ButtrbaseClient:
-    return ButtrbaseClient(api_key=api_key, base_url="https://example.com", timeout=5.0)
+def _make_client(access_token: str = "test-key") -> ButtrbaseClient:
+    return ButtrbaseClient(access_token=access_token, base_url="https://example.com", timeout=5.0)
 
 
 # ---------------------------------------------------------------------------
@@ -158,13 +158,13 @@ class TestHeaders:
         h = client._headers(auth=False)
         assert "Authorization" not in h
 
-    def test_empty_api_key_no_auth_header(self):
+    def test_empty_access_token_no_auth_header(self):
         client = _make_client("")
         h = client._headers(auth=True)
         assert "Authorization" not in h
 
     def test_base_url_trailing_slash_stripped(self):
-        client = ButtrbaseClient(api_key="k", base_url="https://example.com/")
+        client = ButtrbaseClient(access_token="k", base_url="https://example.com/")
         assert client.base_url == "https://example.com"
 
 
@@ -460,19 +460,19 @@ class TestStepUpAuth:
     def _patch(self):
         return patch.object(self.client._session, "request")
 
-    def test_step_up_replaces_api_key(self):
+    def test_step_up_replaces_access_token(self):
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(200, {"access_token": "elevated-key"})
             result = self.client.auth_step_up("123456")
         assert result["access_token"] == "elevated-key"
-        # api_key should be replaced
-        assert self.client.api_key == "elevated-key"
+        # access_token should be replaced
+        assert self.client.access_token == "elevated-key"
 
     def test_step_up_no_access_token_does_not_replace_key(self):
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(200, {"status": "ok"})
             self.client.auth_step_up("123456")
-        assert self.client.api_key == "original-key"
+        assert self.client.access_token == "original-key"
 
     def test_step_up_with_recovery(self):
         with self._patch() as mock_req:
@@ -1111,7 +1111,7 @@ class TestRetryStrategy:
 
     def test_max_retries_zero_disables(self):
         client = ButtrbaseClient(
-            api_key="k", base_url="https://example.com", max_retries=0
+            access_token="k", base_url="https://example.com", max_retries=0
         )
         with patch.object(client._session, "request") as mock_req, \
                 patch("buttrbase.client.time.sleep") as sleep:

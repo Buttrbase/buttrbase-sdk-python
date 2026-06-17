@@ -4,19 +4,14 @@ from .errors import ButtrbaseError
 from . import webhooks
 from .types import (
     AcceptInvitationResponse,
-    ApiKeySummary,
     AppRpConfig,
     AuditRow,
     CheckOrgNameResponse,
-    CreateApiKeyInput,
     CreateCredentialResponse,
     CreateInvitationRequest,
     CreateOAuthConfigInput,
-    CreatedKeyResponse,
     Credential,
     DeviceItem,
-    ExchangeResponse,
-    ExpiryInput,
     FinalizeRegistrationRequest,
     InvitationListItem,
     InvitationPreview,
@@ -51,13 +46,6 @@ __all__ = [
     "CreateCredentialResponse",
     "RotateSecretResponse",
     "SandboxResetResponse",
-    # API key exchange
-    "ExchangeResponse",
-    # App API keys
-    "ApiKeySummary",
-    "CreatedKeyResponse",
-    "CreateApiKeyInput",
-    "ExpiryInput",
     # OAuth configs
     "OAuthConfigSummary",
     "CreateOAuthConfigInput",

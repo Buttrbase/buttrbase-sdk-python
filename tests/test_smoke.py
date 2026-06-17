@@ -21,7 +21,7 @@ skip_if_no_net = pytest.mark.skipif(
 
 @pytest.fixture
 def client() -> ButtrbaseClient:
-    return ButtrbaseClient(api_key="", base_url=SMOKE_BASE, timeout=10.0)
+    return ButtrbaseClient(access_token="", base_url=SMOKE_BASE, timeout=10.0)
 
 
 @skip_if_no_net
@@ -103,7 +103,7 @@ def _stub_session(client: ButtrbaseClient, captured: dict, payload: object,
 
 
 def test_scope_context_request_and_token_stash() -> None:
-    client = ButtrbaseClient(api_key="old-token", base_url="https://x")
+    client = ButtrbaseClient(access_token="old-token", base_url="https://x")
     captured: dict = {}
     _stub_session(
         client, captured, {"token": "new-token", "scopes": ["a", "b"]}
@@ -115,11 +115,11 @@ def test_scope_context_request_and_token_stash() -> None:
     assert captured["headers"]["Authorization"] == "Bearer old-token"
     assert resp == {"token": "new-token", "scopes": ["a", "b"]}
     # New windowed token is stashed back onto the client.
-    assert client.api_key == "new-token"
+    assert client.access_token == "new-token"
 
 
 def test_list_devices_unwraps_data_envelope() -> None:
-    client = ButtrbaseClient(api_key="t", base_url="https://x")
+    client = ButtrbaseClient(access_token="t", base_url="https://x")
     captured: dict = {}
     rows = [
         {
@@ -138,7 +138,7 @@ def test_list_devices_unwraps_data_envelope() -> None:
 
 
 def test_revoke_device_path_and_unwrap() -> None:
-    client = ButtrbaseClient(api_key="t", base_url="https://x")
+    client = ButtrbaseClient(access_token="t", base_url="https://x")
     captured: dict = {}
     _stub_session(
         client, captured, {"data": {"device_uuid": "d1", "revoked": True}}
@@ -150,7 +150,7 @@ def test_revoke_device_path_and_unwrap() -> None:
 
 
 def test_get_tenant_home_params_and_anonymous() -> None:
-    client = ButtrbaseClient(api_key="t", base_url="https://x")
+    client = ButtrbaseClient(access_token="t", base_url="https://x")
     captured: dict = {}
     _stub_session(
         client,

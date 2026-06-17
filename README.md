@@ -17,7 +17,10 @@ pip install buttrbase
 ```python
 from buttrbase import ButtrbaseClient
 
-client = ButtrbaseClient(api_key="bb_live_...")
+# App-server callers authenticate with an OAuth2 client-credentials
+# access token (see "App Authentication" below). End-user flows can start
+# from an anonymous client and let login() stash the user token.
+client = ButtrbaseClient(access_token="<oauth2-access-token>")
 
 # Login — app_uuid is required (the UUID for your app on ButtrBase)
 resp = client.login(
@@ -31,6 +34,39 @@ print(resp["access_token"])
 # Get profile
 profile = client.get_profile()
 print(profile)
+```
+
+## App Authentication (OAuth2 client-credentials)
+
+App servers authenticate with an OAuth2 **client-credentials** pair —
+a `client_id` and `client_secret`. Static API keys (`wb_live_*` /
+`wb_test_*`) are no longer supported.
+
+Manage client-credentials with the `/credentials` endpoints. The
+`client_secret` is returned **only** on create and rotate — store it in a
+secret manager.
+
+```python
+# Create a credential. client_secret is shown once.
+created = client.create_credential("prod-server")
+client_id = created["client_id"]
+client_secret = created["client_secret"]  # store securely
+
+# Rotate the secret when needed (also shown once).
+rotated = client.rotate_credential_secret(created["credentials_id"])
+client_secret = rotated["client_secret"]
+
+# List / fetch / delete.
+creds = client.list_credentials()
+cred = client.get_credential(created["credentials_id"])
+client.delete_credential(created["credentials_id"])
+```
+
+Exchange the `client_id` + `client_secret` for an access token at your
+deployment's OAuth2 token endpoint, then construct the client with it:
+
+```python
+client = ButtrbaseClient(access_token="<oauth2-access-token>")
 ```
 
 ## Authentication
@@ -130,24 +166,6 @@ url = client.oauth_start_url(
 # Send `url` back to the browser as a 302 Location.
 ```
 
-### API Key Exchange (initial + refresh rotation cycle)
-
-```python
-# 1. Initial exchange — long-lived raw key in, short-lived JWT out.
-exchanged = client.exchange_api_key("wb_live_xa9dBz…")
-access = exchanged["access_token"]
-refresh = exchanged["refresh_token"]
-
-# 2. Use the access JWT until it expires (~60 min).
-authed = ButtrbaseClient(api_key=access)
-
-# 3. When it expires, swap the refresh token for a fresh pair.
-#    The presented refresh token is one-time-use — store the new one.
-rotated = client.exchange_refresh_token(refresh)
-access = rotated["access_token"]
-refresh = rotated["refresh_token"]
-```
-
 ### SSO (OIDC / SAML)
 
 ```python
@@ -175,7 +193,7 @@ client.mfa_totp_disable()
 
 ```python
 resp = client.auth_step_up("totp-code")
-# client.api_key is auto-replaced with the elevated token
+# client.access_token is auto-replaced with the elevated token
 ```
 
 ## Organization Security
@@ -425,43 +443,6 @@ Errors are raised as `buttrbase.ButtrbaseError` with `status_code`, `code`, `det
 
 See https://buttrbase.com/docs for the full API reference.
 
-## App-Level API Keys (admin)
-
-```python
-APP_UUID = "018f1234-5678-7000-8000-000000000001"
-
-# List every key for the app (including revoked ones). raw_key is
-# never included here.
-keys = client.list_app_api_keys(APP_UUID)
-
-# Create a short-lived production key. raw_key is shown EXACTLY ONCE
-# in the response — save it now or rotate to get a new one.
-created = client.create_app_api_key(
-    APP_UUID,
-    {"name": "production-server", "env": "live", "key_type": "short_lived"},
-)
-raw = created["raw_key"]  # wb_live_xa9dBz… — store this in a secret manager
-
-# Time-boxed key for a contractor.
-client.create_app_api_key(
-    APP_UUID,
-    {
-        "name": "contractor-march-2026",
-        "env": "live",
-        "key_type": "expiring",
-        "expiry": {"in_days": 30},
-    },
-)
-
-# Rotate — issues a new key, immediately revokes the old. raw_key
-# shown once.
-rotated = client.rotate_app_api_key(APP_UUID, created["key_uuid"])
-
-# Revoke. Idempotent — re-revoking an already-revoked key is a no-op.
-# Also invalidates every refresh token issued against the key.
-client.revoke_app_api_key(APP_UUID, created["key_uuid"])
-```
-
 ## OAuth Configs (admin)
 
 ```python
@@ -498,9 +479,9 @@ client.delete_oauth_config(APP_UUID, "google")
 # Most recent events for the app.
 events = client.read_audit_log(APP_UUID, limit=50)
 
-# Filter to just API-key lifecycle events.
-key_events = client.read_audit_log(
-    APP_UUID, limit=100, action_prefix="api_key."
+# Filter to just OAuth-config lifecycle events.
+cfg_events = client.read_audit_log(
+    APP_UUID, limit=100, action_prefix="oauth_config."
 )
 ```
 
@@ -534,7 +515,7 @@ print(home["tenancy_mode"], home["home_region"], home["home_base_url"])
 ```python
 from buttrbase import ButtrbaseClient
 
-client = ButtrbaseClient(api_key="bb_live_...")
+client = ButtrbaseClient(access_token="<oauth2-access-token>")
 APP_UUID = "018f1234-5678-7000-8000-000000000001"
 
 # 1. Register and login
@@ -560,29 +541,23 @@ team = client.create_team({"name": "Engineering", "org_uuid": profile["org"]["uu
 client.add_team_member(team["uuid"], "colleague-user-uuid")
 ```
 
-### Backend-to-Backend Auth (short-lived + refresh rotation)
+### Backend-to-Backend Auth (OAuth2 client-credentials)
 
 ```python
-APP_UUID = "018f1234-5678-7000-8000-000000000001"
+# 1. (One-time) Create a client-credentials pair. client_secret is shown
+#    once — store it in a secret manager.
+admin = ButtrbaseClient(access_token=ADMIN_ACCESS_TOKEN)
+created = admin.create_credential("prod-srv")
+CLIENT_ID = created["client_id"]
+CLIENT_SECRET = created["client_secret"]  # save this — shown once
 
-# 1. (One-time, in the admin UI or via SDK) — create a short_lived key.
-admin = ButtrbaseClient(api_key=ADMIN_JWT)
-created = admin.create_app_api_key(
-    APP_UUID,
-    {"name": "prod-srv", "env": "live", "key_type": "short_lived"},
-)
-RAW_KEY = created["raw_key"]  # save this — shown once
+# 2. On boot, your server exchanges client_id + client_secret for an
+#    access token at your deployment's OAuth2 token endpoint, then:
+client = ButtrbaseClient(access_token="<oauth2-access-token>")
 
-# 2. On boot, your server exchanges the raw key for an access JWT.
-anon = ButtrbaseClient(api_key="")
-pair = anon.exchange_api_key(RAW_KEY)
-client = ButtrbaseClient(api_key=pair["access_token"])
-refresh = pair["refresh_token"]
-
-# 3. Before the access token expires (~60 min), rotate.
-pair = anon.exchange_refresh_token(refresh)
-client.api_key = pair["access_token"]
-refresh = pair["refresh_token"]  # one-time-use — overwrite stored value
+# 3. Re-fetch a fresh access token from the token endpoint before the
+#    current one expires and update the client:
+client.access_token = "<new-oauth2-access-token>"
 ```
 
 ### Registering a Social Login Provider

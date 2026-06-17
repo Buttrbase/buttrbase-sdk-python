@@ -14,19 +14,15 @@ from urllib.parse import urlencode
 from .errors import ButtrbaseError
 from .types import (
     AcceptInvitationResponse,
-    ApiKeySummary,
     AppRpConfig,
     AuditRow,
     CheckOrgNameResponse,
     ContactSubmitResponse,
-    CreateApiKeyInput,
     CreateCredentialResponse,
     CreateInvitationRequest,
     CreateOAuthConfigInput,
-    CreatedKeyResponse,
     Credential,
     DeviceItem,
-    ExchangeResponse,
     FinalizeRegistrationRequest,
     GeoResponse,
     InvitationListItem,
@@ -84,13 +80,28 @@ class ButtrbaseClient:
 
     def __init__(
         self,
-        api_key: str,
+        access_token: str = "",
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 10.0,
         max_retries: int = 3,
         retry_base_delay: float = 0.5,
     ) -> None:
-        self.api_key = api_key
+        """Create a client.
+
+        Args:
+            access_token: A bearer access token sent as
+                ``Authorization: Bearer <token>``. For app-server callers
+                this is an OAuth2 client-credentials access token; for
+                end-user flows it is the JWT returned by ``login`` and
+                friends (those methods stash the new token here
+                automatically). Pass ``""`` (the default) for an anonymous
+                client used only for public / pre-auth endpoints.
+            base_url: The API base URL.
+            timeout: Per-request timeout in seconds.
+            max_retries: Number of retries on retryable failures.
+            retry_base_delay: Base delay for exponential backoff.
+        """
+        self.access_token = access_token
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.max_retries = max_retries
@@ -100,8 +111,8 @@ class ButtrbaseClient:
     # ----- internal -----
     def _headers(self, auth: bool = True) -> dict:
         h = {"Accept": "application/json", "Content-Type": "application/json"}
-        if auth and self.api_key:
-            h["Authorization"] = f"Bearer {self.api_key}"
+        if auth and self.access_token:
+            h["Authorization"] = f"Bearer {self.access_token}"
         return h
 
     def _request(
@@ -325,7 +336,7 @@ class ButtrbaseClient:
         payload = {"code": code, "recovery": recovery}
         body = self._request("POST", "/api/auth/step-up", json=payload)
         if isinstance(body, dict) and body.get("access_token"):
-            self.api_key = body["access_token"]
+            self.access_token = body["access_token"]
         return body
 
     # ----- JIT elevation (admin) -----
@@ -618,7 +629,7 @@ class ButtrbaseClient:
         }
         body = self._request("POST", "/api/auth/login", json=payload, auth=False)
         if isinstance(body, dict) and body.get("access_token"):
-            self.api_key = body["access_token"]
+            self.access_token = body["access_token"]
         return body
 
     def lookup_organizations(self, email: str, app_uuid: str) -> dict:
@@ -1594,39 +1605,6 @@ class ButtrbaseClient:
         """GET /api/geo/ip."""
         return self._request("GET", "/api/geo/ip", auth=False)
 
-    # ===== API key exchange (anonymous) =====
-    def exchange_api_key(self, api_key: str) -> ExchangeResponse:
-        """POST /api/v1/auth/api-key/exchange — initial exchange.
-
-        Trade a long-lived ``short_lived`` raw key (``wb_<env>_<random>``)
-        for a short-lived access JWT plus a 90-day rotating refresh
-        token. The raw key is never sent on hot-path requests after this.
-
-        Args:
-            api_key: The raw key returned exactly once from
-                ``create_app_api_key`` / ``rotate_app_api_key``.
-        """
-        return self._request(
-            "POST",
-            "/api/v1/auth/api-key/exchange",
-            json={"api_key": api_key},
-            auth=False,
-        )
-
-    def exchange_refresh_token(self, refresh_token: str) -> ExchangeResponse:
-        """POST /api/v1/auth/api-key/exchange — refresh exchange.
-
-        Trade an opaque refresh token from a previous exchange for a
-        fresh access/refresh pair. The presented refresh token is
-        immediately revoked — refresh is one-time-use.
-        """
-        return self._request(
-            "POST",
-            "/api/v1/auth/api-key/exchange",
-            json={"refresh_token": refresh_token},
-            auth=False,
-        )
-
     # ===== OAuth start URL helper =====
     def oauth_start_url(self, provider: str, app_uuid: str, return_to: str) -> str:
         """Build the public OAuth ``/start`` URL.
@@ -1645,53 +1623,6 @@ class ButtrbaseClient:
         """
         query = urlencode({"app_uuid": app_uuid, "return_to": return_to})
         return f"{self.base_url}/api/v1/auth/oauth/{provider}/start?{query}"
-
-    # ===== App-level API keys (admin) =====
-    def list_app_api_keys(self, app_uuid: str) -> list:
-        """GET /api/v1/apps/:app_uuid/api-keys.
-
-        Returns every key for the app — including revoked ones —
-        without ``raw_key``. Each row is an ``ApiKeySummary``.
-        """
-        return self._request("GET", f"/api/v1/apps/{app_uuid}/api-keys")
-
-    def create_app_api_key(
-        self, app_uuid: str, input: CreateApiKeyInput
-    ) -> CreatedKeyResponse:
-        """POST /api/v1/apps/:app_uuid/api-keys.
-
-        ``raw_key`` is returned **exactly once** — the server stores
-        only the SHA-256 hash and cannot recover it later. If you don't
-        save it on this call, you'll need to rotate to get a new one.
-
-        For ``key_type == "expiring"`` set ``expiry`` to either
-        ``{"absolute": "<RFC3339>"}`` or ``{"in_days": N}``. Both
-        resolve to a UTC timestamp at create time.
-        """
-        return self._request(
-            "POST", f"/api/v1/apps/{app_uuid}/api-keys", json=dict(input)
-        )
-
-    def revoke_app_api_key(self, app_uuid: str, key_uuid: str) -> None:
-        """DELETE /api/v1/apps/:app_uuid/api-keys/:key_uuid.
-
-        Idempotent — revoking an already-revoked key is a no-op. Also
-        invalidates every refresh token issued against this key.
-        """
-        self._request("DELETE", f"/api/v1/apps/{app_uuid}/api-keys/{key_uuid}")
-
-    def rotate_app_api_key(
-        self, app_uuid: str, key_uuid: str
-    ) -> CreatedKeyResponse:
-        """POST /api/v1/apps/:app_uuid/api-keys/:key_uuid/rotate.
-
-        Issues a new key with the same name (suffixed ``(rotated)``),
-        type, and env as the original, then revokes the old one.
-        Returns the same shape as create — ``raw_key`` shown once.
-        """
-        return self._request(
-            "POST", f"/api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate"
-        )
 
     # ===== OAuth configs (admin) =====
     def list_oauth_configs(self, app_uuid: str) -> list:
@@ -1773,7 +1704,8 @@ class ButtrbaseClient:
             limit: Cap on number of rows returned (server enforces an
                 upper bound).
             action_prefix: Optional action-string prefix filter — e.g.
-                ``"api_key."`` returns only key lifecycle events.
+                ``"oauth_config."`` returns only OAuth-config lifecycle
+                events.
         """
         params: dict = {}
         if limit is not None:
@@ -1797,7 +1729,7 @@ class ButtrbaseClient:
         subset of the caller's effective scopes, and each requested scope is
         run through the scope-gate (step-up) machinery.
 
-        On success the new access token is stashed onto ``self.api_key`` so
+        On success the new access token is stashed onto ``self.access_token`` so
         subsequent calls use the windowed token, mirroring ``login`` /
         ``auth_step_up``. Only the access token is re-minted; the refresh
         token is unchanged and not returned.
@@ -1815,7 +1747,7 @@ class ButtrbaseClient:
             json={"requested_scopes": requested_scopes},
         )
         if isinstance(body, dict) and body.get("token"):
-            self.api_key = body["token"]
+            self.access_token = body["token"]
         return body
 
     # ===== Devices (end-user self-service device-key management) =====
