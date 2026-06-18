@@ -40,8 +40,7 @@ print(profile)
 ## App Authentication (OAuth2 client-credentials)
 
 App servers authenticate with an OAuth2 **client-credentials** pair —
-a `client_id` and `client_secret`. Static API keys (`wb_live_*` /
-`wb_test_*`) are no longer supported.
+a `client_id` and `client_secret`.
 
 Manage client-credentials with the `/credentials` endpoints. The
 `client_secret` is returned **only** on create and rotate — store it in a
