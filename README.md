@@ -35,6 +35,29 @@ print(profile)
 
 ## Authentication
 
+### OAuth2 Client-Credentials (backend services)
+
+The recommended way for backend services to authenticate. Replaces the retired static `wb_*` API key system.
+
+```python
+import os
+from buttrbase import ButtrbaseClient
+
+# Option A: auto-managed token (recommended)
+# The client fetches a token on first use and auto-refreshes before expiry.
+client = ButtrbaseClient(
+    client_id=os.environ["BUTTRBASE_CLIENT_ID"],
+    client_secret=os.environ["BUTTRBASE_CLIENT_SECRET"],
+)
+
+# Option B: one-shot token fetch (manual management)
+token = ButtrbaseClient.get_app_token(
+    os.environ["BUTTRBASE_CLIENT_ID"],
+    os.environ["BUTTRBASE_CLIENT_SECRET"],
+)
+client = ButtrbaseClient(api_key=token["access_token"])
+```
+
 ### Register
 
 ```python

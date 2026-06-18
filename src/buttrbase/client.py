@@ -1,6 +1,8 @@
 """ButtrBase API client."""
 from __future__ import annotations
 
+import threading
+import time
 import warnings
 from typing import Any, List, Optional
 
@@ -62,21 +64,90 @@ class ButtrbaseClient:
 
     def __init__(
         self,
-        api_key: str,
+        *,
+        api_key: str | None = None,
+        client_id: str | None = None,
+        client_secret: str | None = None,
         base_url: str = DEFAULT_BASE_URL,
         timeout: float = 10.0,
     ) -> None:
-        self.api_key = api_key
+        # Validate credential combination
+        has_api_key = api_key is not None
+        has_cc = client_id is not None and client_secret is not None
+        has_partial_cc = (client_id is None) != (client_secret is None)
+        if has_partial_cc:
+            raise ValueError(
+                "Provide both client_id and client_secret together, or neither."
+            )
+        if not has_api_key and not has_cc:
+            raise ValueError(
+                "Provide either api_key or both client_id and client_secret."
+            )
+
+        self.api_key: str | None = api_key
+        self._client_id: str | None = client_id
+        self._client_secret: str | None = client_secret
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._session = requests.Session()
 
+        # Token cache for client-credentials flow
+        self._cc_token: str | None = None
+        self._cc_token_expiry: float = 0.0
+        self._cc_lock = threading.Lock()
+
     # ----- internal -----
+    def _get_bearer_token(self) -> str | None:
+        """Return the Bearer token to use, refreshing via client-credentials if needed."""
+        if self.api_key is not None:
+            return self.api_key or None
+        if self._client_id and self._client_secret:
+            with self._cc_lock:
+                if self._cc_token is None or time.time() >= self._cc_token_expiry:
+                    resp = self.get_app_token(
+                        self._client_id,
+                        self._client_secret,
+                        base_url=self.base_url,
+                    )
+                    self._cc_token = resp["access_token"]
+                    self._cc_token_expiry = time.time() + resp.get("expires_in", 3600) - 60
+            return self._cc_token
+        return None
+
     def _headers(self, auth: bool = True) -> dict:
         h = {"Accept": "application/json", "Content-Type": "application/json"}
-        if auth and self.api_key:
-            h["Authorization"] = f"Bearer {self.api_key}"
+        if auth:
+            token = self._get_bearer_token()
+            if token:
+                h["Authorization"] = f"Bearer {token}"
         return h
+
+    @classmethod
+    def get_app_token(
+        cls,
+        client_id: str,
+        client_secret: str,
+        base_url: str = DEFAULT_BASE_URL,
+    ) -> dict:
+        """Exchange client credentials for an access token.
+
+        POST /api/v1/auth/token with grant_type=client_credentials.
+
+        Returns:
+            A dict with ``access_token``, ``token_type``, and ``expires_in``.
+        """
+        url = f"{base_url.rstrip('/')}/api/v1/auth/token"
+        payload = {
+            "grant_type": "client_credentials",
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+        resp = requests.post(
+            url,
+            json=payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+        )
+        return cls._handle(resp)
 
     def _request(
         self,

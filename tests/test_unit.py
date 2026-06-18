@@ -1186,3 +1186,162 @@ class TestTypes:
     def test_geo_response(self):
         resp: GeoResponse = {"ip": "1.2.3.4", "country": "US", "timezone": "UTC"}
         assert resp["ip"] == "1.2.3.4"
+
+    def test_app_token_response(self):
+        from buttrbase.types import AppTokenResponse
+        resp: AppTokenResponse = {
+            "access_token": "eyJ...",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+        }
+        assert resp["access_token"] == "eyJ..."
+        assert resp["expires_in"] == 3600
+
+
+# ---------------------------------------------------------------------------
+# OAuth2 client-credentials — ButtrbaseClient constructor validation
+# ---------------------------------------------------------------------------
+
+class TestClientCredentialsConstructor:
+    def test_api_key_only(self):
+        """Existing api_key= usage still works."""
+        client = ButtrbaseClient(api_key="test-key", base_url="https://example.com")
+        assert client.api_key == "test-key"
+
+    def test_client_credentials_only(self):
+        """client_id + client_secret accepted without api_key."""
+        client = ButtrbaseClient(
+            client_id="cid",
+            client_secret="csec",
+            base_url="https://example.com",
+        )
+        assert client._client_id == "cid"
+        assert client._client_secret == "csec"
+        assert client.api_key is None
+
+    def test_missing_all_credentials_raises(self):
+        with pytest.raises(ValueError, match="client_id"):
+            ButtrbaseClient(base_url="https://example.com")
+
+    def test_client_id_without_secret_raises(self):
+        with pytest.raises(ValueError, match="both client_id and client_secret"):
+            ButtrbaseClient(client_id="cid", base_url="https://example.com")
+
+    def test_client_secret_without_id_raises(self):
+        with pytest.raises(ValueError, match="both client_id and client_secret"):
+            ButtrbaseClient(client_secret="csec", base_url="https://example.com")
+
+    def test_base_url_trailing_slash_stripped(self):
+        client = ButtrbaseClient(api_key="k", base_url="https://example.com/")
+        assert client.base_url == "https://example.com"
+
+
+# ---------------------------------------------------------------------------
+# OAuth2 client-credentials — get_app_token classmethod
+# ---------------------------------------------------------------------------
+
+class TestGetAppToken:
+    TOKEN_RESPONSE = {
+        "access_token": "eyJhbGciOiJSUzI1NiJ9.test",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }
+
+    def test_get_app_token_success(self):
+        mock_resp = _make_response(200, self.TOKEN_RESPONSE)
+        with patch("buttrbase.client.requests.post", return_value=mock_resp) as mock_post:
+            result = ButtrbaseClient.get_app_token("cid", "csec")
+        assert result["access_token"] == self.TOKEN_RESPONSE["access_token"]
+        assert result["token_type"] == "Bearer"
+        assert result["expires_in"] == 3600
+        # Verify correct endpoint was called
+        call_args = mock_post.call_args
+        assert "/api/v1/auth/token" in call_args[0][0]
+        sent = call_args[1]["json"]
+        assert sent["grant_type"] == "client_credentials"
+        assert sent["client_id"] == "cid"
+        assert sent["client_secret"] == "csec"
+
+    def test_get_app_token_custom_base_url(self):
+        mock_resp = _make_response(200, self.TOKEN_RESPONSE)
+        with patch("buttrbase.client.requests.post", return_value=mock_resp) as mock_post:
+            ButtrbaseClient.get_app_token("cid", "csec", base_url="https://custom.example.com")
+        url = mock_post.call_args[0][0]
+        assert url.startswith("https://custom.example.com")
+
+    def test_get_app_token_strips_trailing_slash(self):
+        mock_resp = _make_response(200, self.TOKEN_RESPONSE)
+        with patch("buttrbase.client.requests.post", return_value=mock_resp) as mock_post:
+            ButtrbaseClient.get_app_token("cid", "csec", base_url="https://custom.example.com/")
+        url = mock_post.call_args[0][0]
+        assert "//api" not in url
+
+    def test_get_app_token_error_raises(self):
+        mock_resp = _make_response(401, {"message": "invalid credentials"})
+        with patch("buttrbase.client.requests.post", return_value=mock_resp):
+            with pytest.raises(ButtrbaseError) as exc_info:
+                ButtrbaseClient.get_app_token("bad-cid", "bad-csec")
+        assert exc_info.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# OAuth2 client-credentials — lazy token fetch & caching in _get_bearer_token
+# ---------------------------------------------------------------------------
+
+class TestClientCredentialsTokenFlow:
+    TOKEN_RESPONSE = {
+        "access_token": "eyJ.first",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }
+    TOKEN_RESPONSE_2 = {
+        "access_token": "eyJ.second",
+        "token_type": "Bearer",
+        "expires_in": 3600,
+    }
+
+    def _make_cc_client(self) -> ButtrbaseClient:
+        return ButtrbaseClient(
+            client_id="cid",
+            client_secret="csec",
+            base_url="https://example.com",
+        )
+
+    def test_token_fetched_on_first_request(self):
+        client = self._make_cc_client()
+        with patch("buttrbase.client.requests.post", return_value=_make_response(200, self.TOKEN_RESPONSE)) as mock_post:
+            with patch.object(client._session, "request", return_value=_make_response(200, {"ok": True})):
+                client.get_profile()
+        # Token endpoint must have been called once
+        assert mock_post.call_count == 1
+
+    def test_token_cached_across_requests(self):
+        client = self._make_cc_client()
+        mock_resp = _make_response(200, self.TOKEN_RESPONSE)
+        with patch("buttrbase.client.requests.post", return_value=mock_resp) as mock_post:
+            with patch.object(client._session, "request", return_value=_make_response(200, {"ok": True})):
+                client.get_profile()
+                client.get_profile()
+        # Token endpoint called only once — cached on second call
+        assert mock_post.call_count == 1
+
+    def test_token_refreshed_when_expired(self):
+        import time as _time
+        client = self._make_cc_client()
+        # Seed a token that is already expired
+        client._cc_token = "eyJ.stale"
+        client._cc_token_expiry = _time.time() - 1  # expired
+
+        with patch("buttrbase.client.requests.post", return_value=_make_response(200, self.TOKEN_RESPONSE_2)) as mock_post:
+            with patch.object(client._session, "request", return_value=_make_response(200, {"ok": True})):
+                client.get_profile()
+        assert mock_post.call_count == 1
+        assert client._cc_token == "eyJ.second"
+
+    def test_authorization_header_uses_cc_token(self):
+        client = self._make_cc_client()
+        with patch("buttrbase.client.requests.post", return_value=_make_response(200, self.TOKEN_RESPONSE)):
+            with patch.object(client._session, "request", return_value=_make_response(200, {})) as mock_req:
+                client.get_profile()
+        headers_sent = mock_req.call_args[1]["headers"]
+        assert headers_sent["Authorization"] == f"Bearer {self.TOKEN_RESPONSE['access_token']}"

@@ -6,6 +6,7 @@ from .types import (
     AcceptInvitationResponse,
     ApiKeySummary,
     AppRpConfig,
+    AppTokenResponse,
     AuditRow,
     CheckOrgNameResponse,
     CreateApiKeyInput,
@@ -42,6 +43,8 @@ __all__ = [
     "ButtrbaseClient",
     "ButtrbaseError",
     "webhooks",
+    # OAuth2 client-credentials
+    "AppTokenResponse",
     # Legacy types
     "Credential",
     "CreateCredentialResponse",

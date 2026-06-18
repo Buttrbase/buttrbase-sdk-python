@@ -49,6 +49,14 @@ class SandboxResetResponse(TypedDict):
     status: str
 
 
+class AppTokenResponse(TypedDict):
+    """Response from POST /api/v1/auth/token (OAuth2 client-credentials grant)."""
+
+    access_token: str
+    token_type: str
+    expires_in: int
+
+
 # ----- Invite-based registration -----
 
 class InviteAcceptResponse(TypedDict):
