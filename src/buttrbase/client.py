@@ -292,32 +292,65 @@ class ButtrbaseClient:
         self,
         email: str,
         *,
-        org_uuid: Optional[str] = None,
-        redirect_to: Optional[str] = None,
         app_uuid: Optional[str] = None,
+        redirect_to: Optional[str] = None,
+        org_uuid: Optional[str] = None,
     ) -> dict:
-        """POST /api/auth/magic-link/send.
+        """Send a passwordless magic-link email (``POST /api/auth/magic-link/send``).
+
+        Magic-link is the only browser flow that yields a JWKS-verifiable
+        **RS256** access token. The generic email-OTP endpoints
+        (:meth:`send_otp` / :meth:`verify_otp`) issue HS256 tokens signed with
+        Buttrbase's server secret, which the public JWKS cannot verify, so
+        third-party apps that validate tokens against the JWKS must use
+        magic-link.
+
+        Cross-app federation: if you pass ``app_uuid`` together with a
+        ``redirect_to`` whose *origin* is registered on the Buttrbase
+        application (its WebAuthn ``rp_origins`` or configured redirect URL),
+        the email link points at the app's own callback
+        (``{redirect_to}?token=...``) so the app verifies the RS256 token
+        itself via :meth:`verify_magic_link`. Non-allowlisted or non-absolute
+        ``redirect_to`` targets fall back to the Buttrbase-hosted sign-in page.
+        Omit ``redirect_to`` for the first-party flow.
 
         Args:
-            email: The recipient's email address.
+            email: The recipient's email address. Required.
+            app_uuid: Target-app UUID (string-formatted) for cross-app
+                federation. Required to land on your own callback.
+            redirect_to: Absolute URL the user lands on after clicking the
+                link. Its origin must be allowlisted on the application (see
+                cross-app federation above) or it is ignored.
             org_uuid: Optional org scope the magic link is issued for.
-            redirect_to: Optional URL the user lands on after clicking.
-            app_uuid: Optional target-app UUID (string-formatted).
+
+        Returns:
+            dict: ``{"sent": bool, "dev_token": str | None,
+            "expires_in_seconds": int}``. ``dev_token`` is the raw one-time
+            token, returned only in non-prod dev-echo mode (``None`` in prod).
         """
         payload: dict = {"email": email}
-        if org_uuid is not None:
-            payload["org_uuid"] = org_uuid
-        if redirect_to is not None:
-            payload["redirect_to"] = redirect_to
         if app_uuid is not None:
             payload["app_uuid"] = app_uuid
+        if redirect_to is not None:
+            payload["redirect_to"] = redirect_to
+        if org_uuid is not None:
+            payload["org_uuid"] = org_uuid
         return self._request("POST", "/api/auth/magic-link/send", json=payload, auth=False)
 
     def verify_magic_link(self, token: str) -> dict:
-        """POST /api/auth/magic-link/verify.
+        """Verify a magic-link token (``POST /api/auth/magic-link/verify``).
+
+        Exchanges the single-use token (delivered in the email link as
+        ``?token=...``, or returned as ``dev_token`` in dev-echo mode) for an
+        RS256 access token verifiable against the public JWKS.
 
         Args:
             token: The single-use token from the magic-link email.
+
+        Returns:
+            dict: ``{"access_token": str, "token_type": str,
+            "user": {"user_uuid": str, "email": str},
+            "redirect_to": str | None}``.
         """
         return self._request(
             "POST",

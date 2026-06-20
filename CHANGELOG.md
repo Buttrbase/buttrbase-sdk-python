@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0 — magic-link cross-app federation
+
+### Breaking
+- `send_magic_link` keyword-only parameters reordered to lead with the
+  federation pair: `(email, *, app_uuid=None, redirect_to=None, org_uuid=None)`.
+  Passing `app_uuid` + an allowlisted `redirect_to` now points the email link
+  at the caller app's own callback (`{redirect_to}?token=...`) so the app
+  verifies the RS256 token itself; non-allowlisted/non-absolute targets fall
+  back to the Buttrbase-hosted sign-in page.
+
+### Notes
+- Magic-link is the only browser flow that yields a JWKS-verifiable **RS256**
+  access token. The email-OTP endpoints (`send_otp`/`verify_otp`) issue HS256
+  tokens signed with Buttrbase's server secret, which the public JWKS cannot
+  verify — third-party apps must use magic-link.
+- `send` response documented as `{"sent", "dev_token", "expires_in_seconds"}`
+  and `verify` as `{"access_token", "token_type", "user", "redirect_to"}`.
+  `verify_magic_link(token)` takes only the token (the stale README note
+  claiming it took `app_uuid` is corrected).
+
 ## Unreleased — drop static API keys (OAuth2 client-credentials only)
 
 ### Breaking

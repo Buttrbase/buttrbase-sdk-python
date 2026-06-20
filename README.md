@@ -1,6 +1,6 @@
 # Python SDK
 
-> **Breaking — v0.2 — `app_uuid: str` replaces the `app` slug parameter** on `register`, `login`, `send_otp`, `verify_otp`, `send_magic_link`, `verify_magic_link`, and `lookup_organizations`. The backend no longer accepts slug-shaped app identifiers — pass the UUID directly. The OTP methods are also renamed from `otp_send`/`otp_verify` to `send_otp`/`verify_otp`. See `CHANGELOG.md`.
+> **Breaking — v0.2 — `app_uuid: str` replaces the `app` slug parameter** on `register`, `login`, `send_otp`, `verify_otp`, `send_magic_link`, and `lookup_organizations`. The backend no longer accepts slug-shaped app identifiers — pass the UUID directly. The OTP methods are also renamed from `otp_send`/`otp_verify` to `send_otp`/`verify_otp`. See `CHANGELOG.md`.
 
 ## Overview
 
@@ -110,16 +110,66 @@ resp = client.lookup_organizations("user@example.com", app_uuid=APP_UUID)
 options = client.get_login_options("org-uuid")
 ```
 
-### Magic Link
+### Magic-link (passwordless sign-in)
+
+Magic-link is a two-step, email-based passwordless flow: **send** delivers a
+one-time link to the user's inbox, and **verify** exchanges the link's token
+for an access token.
+
+#### Why magic-link (RS256) and not email OTP (HS256)
+
+Magic-link is the **only browser flow that yields a JWKS-verifiable RS256
+access token.** The generic email-OTP endpoints (`send_otp` / `verify_otp`)
+issue **HS256** tokens signed with Buttrbase's server secret — the public JWKS
+**cannot** verify those. So any third-party app that validates Buttrbase tokens
+against the public JWKS **must use magic-link** for browser sign-in.
+
+| Flow | Token alg | Signed with | Verifiable via public JWKS |
+| --- | --- | --- | --- |
+| Magic-link | RS256 | Buttrbase private key | ✅ Yes |
+| Email OTP (`send_otp`/`verify_otp`) | HS256 | Buttrbase server secret | ❌ No |
+
+#### Send → verify flow
+
+1. **Send** — call `send_magic_link(email, app_uuid=..., redirect_to=...)`.
+   Response: `{"sent": bool, "dev_token": str | None, "expires_in_seconds": int}`.
+   `dev_token` is the raw one-time token, returned only in non-prod dev-echo
+   mode (`None` in prod). The user receives an email with a link.
+2. **Verify** — your callback receives the token (as `?token=...` on
+   `redirect_to`, or you use `dev_token` in dev). Call
+   `verify_magic_link(token)` to exchange it. Response:
+   `{"access_token": str, "token_type": str, "user": {"user_uuid": str, "email": str}, "redirect_to": str | None}`.
+   `access_token` is the RS256 JWT you verify against the JWKS.
+
+#### Cross-app federation and the redirect allowlist
+
+If you pass `app_uuid` together with a `redirect_to` whose **origin** is
+registered on the Buttrbase application (its WebAuthn `rp_origins` or
+configured redirect URL), the email link points at **your app's own callback**
+(`{redirect_to}?token=...`), so your app verifies the RS256 token itself. This
+is what enables a third-party app to own the sign-in completion.
+
+- Non-allowlisted or non-absolute `redirect_to` targets **fall back** to the
+  Buttrbase-hosted sign-in page.
+- **Omit `redirect_to`** for the first-party (Buttrbase-hosted) flow.
+
+#### Example
 
 ```python
-client.send_magic_link(
+# 1. Send the magic-link email pointing at your app's callback.
+sent = client.send_magic_link(
     "user@example.com",
     app_uuid=APP_UUID,
-    redirect_to="https://app.example.com",
+    redirect_to="https://app.example.com/auth/callback",
 )
-resp = client.verify_magic_link("token-from-email", app_uuid=APP_UUID)
-print(resp["access_token"])  # JWT with sub, org, aud claims
+print(sent["expires_in_seconds"])
+token = sent.get("dev_token")  # dev-echo only; None in prod
+
+# 2. In your callback handler, exchange the token for an RS256 access token.
+#    (In prod the token arrives as ?token=... on your redirect_to URL.)
+resp = client.verify_magic_link(token)
+print(resp["access_token"])          # RS256 JWT — verify against the public JWKS
+print(resp["user"]["user_uuid"])
 ```
 
 ### OTP (Passwordless Phone)
