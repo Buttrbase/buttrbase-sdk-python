@@ -106,6 +106,60 @@ print(principal.org_id)  # "22222222-..."
 All four names (`ClaimsData`, `Claims`, `TokenPrincipal`, `principal_from_payload`)
 are also importable directly from `buttrbase`.
 
+## JWKS-backed RS256 Verifier
+
+*Added in 0.6.0 — feature parity with the Rust SDK `Verifier`. Requires
+`PyJWT[crypto]`.*
+
+```bash
+pip install 'buttrbase[crypto]'
+```
+
+Use `Verifier` when you need to **cryptographically verify** token signatures
+against buttrbase's public JWKS endpoint (i.e. in any server-side middleware
+that accepts user tokens from browsers or API clients).  The JWKS is cached
+internally by `PyJWKClient`; the cache is refreshed on key-miss.
+
+```python
+from buttrbase import Verifier, VerifierError
+
+# Construct once at startup and reuse across requests.
+verifier = Verifier(
+    jwks_url="https://auth.buttrbase.com/.well-known/jwks.json",
+    issuer="https://auth.buttrbase.com",
+    # audience is optional — omit to skip aud validation (most consumers).
+    # Set it if your tokens carry a fixed aud claim you want enforced.
+)
+
+# --- In a request handler ---
+
+# From a raw token string → enriched Claims (sub/org/exp/iat/scope/data)
+try:
+    claims = verifier.verify_token(access_token_string)
+    print(claims.sub)          # user UUID
+    print(claims.data.roles)   # "owner" (raw comma/space string)
+    print(claims.data.email)   # "user@example.com"
+except VerifierError as e:
+    # expired, bad signature, wrong issuer, etc.
+    raise
+
+# From a Bearer authorization header → TokenPrincipal (split roles, scopes)
+try:
+    principal = verifier.verify_bearer(request.headers["Authorization"])
+    print(principal.user_id)   # "11111111-..."
+    print(principal.org_id)    # "22222222-..."
+    print(principal.roles)     # ["owner"] — split from data.roles
+    print(principal.email)     # "user@example.com"
+    print(principal.scopes)    # ["read:messages", "write:messages"]
+except VerifierError as e:
+    raise  # missing Bearer, expired, etc.
+```
+
+`VerifierError` is raised on: malformed token, bad signature, expired token,
+wrong issuer, wrong audience, JWKS fetch failure, or missing `Bearer` prefix.
+Both `Verifier` and `VerifierError` are exported from the top-level `buttrbase`
+package.
+
 ## Authentication
 
 ### Register

@@ -3,7 +3,7 @@ from .client import ButtrbaseClient
 from .errors import ButtrbaseError
 from . import webhooks
 from . import verify
-from .verify import ClaimsData, Claims, TokenPrincipal, principal_from_payload
+from .verify import ClaimsData, Claims, TokenPrincipal, principal_from_payload, Verifier, VerifierError
 from .types import (
     AcceptInvitationResponse,
     AppRpConfig,
@@ -49,6 +49,9 @@ __all__ = [
     "Claims",
     "TokenPrincipal",
     "principal_from_payload",
+    # JWKS-backed signature verifier
+    "Verifier",
+    "VerifierError",
     # Legacy types
     "Credential",
     "CreateCredentialResponse",

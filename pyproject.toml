@@ -13,6 +13,7 @@ Repository = "https://github.com/S7-Works/buttrbase-sdk-python"
 Changelog = "https://github.com/S7-Works/buttrbase-sdk-python/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
+crypto = ["PyJWT[crypto]>=2.8"]
 dev = ["pytest>=7", "pytest-cov"]
 
 [build-system]

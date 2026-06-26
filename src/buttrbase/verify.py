@@ -17,6 +17,25 @@ Usage (offline, from a decoded payload dict)::
 
     print(principal.roles)   # e.g. ["owner", "org_admin"]
     print(principal.email)   # e.g. "test@example.com"
+
+Usage (signature-verified, from a JWKS-backed live token)::
+
+    from buttrbase.verify import Verifier
+
+    verifier = Verifier(
+        jwks_url="https://auth.buttrbase.com/.well-known/jwks.json",
+        issuer="https://auth.buttrbase.com",
+        # audience is optional — omit to skip aud validation (most consumers)
+    )
+
+    # Verify a bare token string → enriched Claims
+    claims = verifier.verify_token("eyJ...")
+    print(claims.data.roles)  # e.g. "owner"
+
+    # Verify a Bearer authorization header → TokenPrincipal (auth-context)
+    principal = verifier.verify_bearer("Bearer eyJ...")
+    print(principal.roles)    # e.g. ["owner"]
+    print(principal.email)    # e.g. "test@example.com"
 """
 from __future__ import annotations
 
@@ -29,10 +48,26 @@ __all__ = [
     "Claims",
     "TokenPrincipal",
     "principal_from_payload",
+    "Verifier",
+    "VerifierError",
 ]
 
 # Delimiter pattern: one or more commas and/or spaces.
 _ROLE_SPLIT = re.compile(r"[,\s]+")
+
+# ---------------------------------------------------------------------------
+# Optional PyJWT[crypto] import — module-level so it is patchable in tests.
+# The Verifier class raises a helpful ImportError at construction time when
+# PyJWT is absent, rather than at import time, preserving the no-crypto path.
+# ---------------------------------------------------------------------------
+try:
+    import jwt as _jwt_module
+    from jwt import PyJWKClient
+    _JWT_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _jwt_module = None  # type: ignore[assignment]
+    PyJWKClient = None  # type: ignore[assignment,misc]
+    _JWT_AVAILABLE = False
 
 
 @dataclass
@@ -157,3 +192,139 @@ def principal_from_payload(payload: Dict[str, Any]) -> "TokenPrincipal":
         ``email`` (``str | None``) populated from the ``data`` envelope.
     """
     return TokenPrincipal.from_claims(Claims.from_dict(payload))
+
+
+# ---------------------------------------------------------------------------
+# JWKS-backed signature verifier
+# ---------------------------------------------------------------------------
+
+
+class VerifierError(Exception):
+    """Raised when token verification fails.
+
+    The ``message`` attribute carries a human-readable reason; it is safe
+    to log but should **not** be forwarded verbatim to end-users in
+    production because it may contain token fragments.
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class Verifier:
+    """RS256 JWKS-backed token verifier — Python mirror of the Rust SDK's
+    ``Verifier`` type.
+
+    Construct once at application startup and share the instance across
+    handlers; :class:`jwt.PyJWKClient` manages its own JWKS cache internally.
+
+    Args:
+        jwks_url: Public JWKS discovery URL, e.g.
+            ``"https://auth.buttrbase.com/.well-known/jwks.json"``.
+        issuer: Expected ``iss`` claim, e.g. ``"https://auth.buttrbase.com"``.
+        audience: Expected ``aud`` claim.  Pass ``None`` (the default) to skip
+            audience validation — buttrbase access tokens do not carry a
+            stable, per-application ``aud`` claim in most flows.
+    """
+
+    def __init__(
+        self,
+        jwks_url: str,
+        issuer: str,
+        audience: Optional[str] = None,
+    ) -> None:
+        if not _JWT_AVAILABLE or PyJWKClient is None:  # pragma: no cover
+            raise ImportError(
+                "buttrbase Verifier requires PyJWT[crypto]. "
+                "Install it with: pip install 'PyJWT[crypto]'"
+            )
+
+        self._jwt = _jwt_module
+        # PyJWKClient is module-level so tests can patch buttrbase.verify.PyJWKClient
+        self._jwks_client: Any = PyJWKClient(jwks_url, cache_keys=True)
+        self._issuer = issuer
+        self._audience = audience
+
+    @property
+    def issuer(self) -> str:
+        """The configured issuer string."""
+        return self._issuer
+
+    @property
+    def audience(self) -> Optional[str]:
+        """The configured audience, or ``None`` if audience validation is
+        disabled."""
+        return self._audience
+
+    def verify_token(self, token: str) -> Claims:
+        """Verify *token* and return the enriched :class:`Claims`.
+
+        Signature validation uses the JWKS endpoint supplied at construction.
+        The JWKS is fetched lazily and cached by :class:`~jwt.PyJWKClient`.
+        A cache-miss triggers one automatic refresh.
+
+        Args:
+            token: A bare JWT string (without the ``Bearer `` prefix).
+
+        Returns:
+            :class:`Claims` — the full typed payload, including the ``data``
+            envelope when present.
+
+        Raises:
+            VerifierError: If the token is malformed, the signature is invalid,
+                the issuer does not match, the token is expired, or the ``kid``
+                is not found in the JWKS.
+        """
+        try:
+            signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+        except Exception as exc:
+            raise VerifierError(f"JWKS key lookup failed: {exc}") from exc
+
+        decode_options: Dict[str, Any] = {}
+        if self._audience is None:
+            decode_options["verify_aud"] = False
+
+        try:
+            payload: Dict[str, Any] = self._jwt.decode(
+                token,
+                signing_key,
+                algorithms=["RS256"],
+                issuer=self._issuer,
+                audience=self._audience,
+                options=decode_options,
+            )
+        except self._jwt.ExpiredSignatureError as exc:
+            raise VerifierError(f"Token has expired: {exc}") from exc
+        except self._jwt.InvalidIssuerError as exc:
+            raise VerifierError(f"Invalid issuer: {exc}") from exc
+        except self._jwt.InvalidAudienceError as exc:
+            raise VerifierError(f"Invalid audience: {exc}") from exc
+        except self._jwt.PyJWTError as exc:
+            raise VerifierError(f"Token verification failed: {exc}") from exc
+
+        return Claims.from_dict(payload)
+
+    def verify_bearer(self, authorization: str) -> TokenPrincipal:
+        """Strip a ``Bearer <token>`` header value, verify the token, and
+        return the application-level :class:`TokenPrincipal`.
+
+        Args:
+            authorization: The raw ``Authorization`` header value, e.g.
+                ``"Bearer eyJ..."``.
+
+        Returns:
+            :class:`TokenPrincipal` with ``roles``, ``email``, ``scopes``,
+            ``user_id``, and ``org_id`` populated.
+
+        Raises:
+            VerifierError: If the header is not a ``Bearer`` token, or if
+                verification of the token fails.
+        """
+        if not authorization or not authorization.startswith("Bearer "):
+            raise VerifierError(
+                "Authorization header is missing or is not a Bearer token"
+            )
+        token = authorization[len("Bearer "):]
+        claims = self.verify_token(token)
+        return TokenPrincipal.from_claims(claims)

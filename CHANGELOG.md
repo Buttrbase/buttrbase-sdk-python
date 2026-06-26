@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.0 — JWKS-backed RS256 Verifier (feature parity with Rust SDK)
+
+Mirrors Rust SDK `Verifier`. Strictly additive — no existing fields removed or
+renamed. Requires `PyJWT[crypto]>=2.8`; install via `pip install 'buttrbase[crypto]'`.
+
+### Added
+
+- `buttrbase.verify.Verifier` — RS256 JWKS-backed token verifier with an
+  internal JWKS cache (via `PyJWKClient`). Constructor args:
+  `Verifier(jwks_url, issuer, audience=None)`. Mirrors the Rust SDK's
+  `VerifierConfig { jwks_url, issuer, audience: Option }`.
+- `Verifier.verify_token(token: str) -> Claims` — fetches/caches the JWKS,
+  validates RS256 signature + issuer (+ optional audience), returns enriched
+  `Claims` (reusing the existing dataclasses — no duplication).
+- `Verifier.verify_bearer(authorization: str) -> TokenPrincipal` — strips
+  `Bearer ` prefix, calls `verify_token`, returns `TokenPrincipal`
+  (roles/email/scopes/user_id/org_id). Mirrors Rust SDK's `verify_bearer`.
+- `buttrbase.verify.VerifierError` — raised on any verification failure
+  (bad signature, expired, wrong issuer, wrong audience, JWKS fetch error).
+- Both `Verifier` and `VerifierError` re-exported from the top-level
+  `buttrbase` package.
+- `PyJWT[crypto]>=2.8` added as `[crypto]` optional extra in `pyproject.toml`.
+  Install with `pip install 'buttrbase[crypto]'`.
+- 22 new tests in `tests/test_verifier.py` — fully offline (PyJWKClient
+  monkeypatched; RSA keypairs generated locally). Covers happy path, bad
+  signature, wrong issuer, expired, wrong audience, missing Bearer, JWKS
+  lookup failure, and end-to-end enriched claims / roles / email / scopes.
+
 ## 0.5.0 — token claims enrichment (data-envelope: roles / email)
 
 Mirrors Rust SDK 0.6.0.  Strictly additive — no existing fields removed or renamed.
