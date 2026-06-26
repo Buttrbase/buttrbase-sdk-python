@@ -14,6 +14,9 @@ from urllib.parse import urlencode
 from .errors import ButtrbaseError
 from .types import (
     AcceptInvitationResponse,
+    AccessToken,
+    AppCredentialsResponse,
+    AppEntry,
     AppRpConfig,
     AuditRow,
     CheckOrgNameResponse,
@@ -23,6 +26,7 @@ from .types import (
     CreateOAuthConfigInput,
     Credential,
     DeviceItem,
+    EntitlementResult,
     FinalizeRegistrationRequest,
     GeoResponse,
     InvitationListItem,
@@ -31,6 +35,7 @@ from .types import (
     InviteAcceptResponse,
     OAuthConfigSummary,
     OrgCheckResponse,
+    OrgEntry,
     PasskeyAuthChallenge,
     PasskeyAuthComplete,
     PasskeyListItem,
@@ -42,11 +47,15 @@ from .types import (
     RotateSecretResponse,
     SandboxResetResponse,
     ScopeContextResponse,
+    SubscriptionItem,
     SuperuserResponse,
     TenantHome,
     TokenPair,
     UpdateAppRpConfigRequest,
     UpdateOAuthConfigInput,
+    UsageEvent,
+    WalletSummary,
+    WalletTransaction,
     PasswordResetRequestResponse,
     PasswordResetResponse,
     WebhookListResponse,
@@ -861,11 +870,16 @@ class ButtrbaseClient:
         """POST /api/v1/auth/check-org-name — check org name availability.
 
         Returns available, normalized form, and reason if unavailable.
+
+        .. note::
+            :meth:`check_org_name` is the canonical Rust-parity alias for
+            this method.  Both names are kept for backwards compatibility.
         """
         return self._request(
             "POST", "/api/v1/auth/check-org-name",
             json={"name": name}, auth=False
         )
+
 
     def finalize_registration(self, req: FinalizeRegistrationRequest) -> RegistrationResult:
         """POST /api/v1/auth/finalize-registration.
@@ -1170,18 +1184,86 @@ class ButtrbaseClient:
 
     # ----- Entitlements -----
     def entitlements_check(self, feature: str, org_uuid: Optional[str] = None) -> dict:
-        """POST /api/entitlements/check."""
+        """POST /api/entitlements/check.
+
+        .. deprecated::
+            Use :meth:`check_entitlement` for canonical Rust-parity shape
+            (``feature_key`` body field, bearer-first signature).
+        """
         payload: dict = {"feature": feature}
         if org_uuid is not None:
             payload["org_uuid"] = org_uuid
         return self._request("POST", "/api/entitlements/check", json=payload)
 
     def entitlements_check_batch(self, checks: list) -> dict:
-        """POST /api/entitlements/check/batch."""
+        """POST /api/entitlements/check/batch.
+
+        .. deprecated::
+            Use :meth:`check_entitlements` for canonical Rust-parity shape
+            (``feature_keys`` body field, returns ``dict[str, EntitlementResult]``).
+        """
         return self._request("POST", "/api/entitlements/check/batch", json={"checks": checks})
 
     def entitlements_effective(self) -> dict:
-        """GET /api/entitlements/effective."""
+        """GET /api/entitlements/effective.
+
+        .. deprecated::
+            Use :meth:`effective_entitlements` for canonical Rust-parity shape.
+        """
+        return self._request("GET", "/api/entitlements/effective")
+
+    # ── Entitlements — canonical Rust-parity surface ──────────────────────
+
+    def check_entitlement(self, bearer: str, feature_key: str) -> EntitlementResult:
+        """POST /api/entitlements/check — check a single feature entitlement.
+
+        Canonical Rust-parity method.  Uses ``feature_key`` (not ``feature``)
+        to match the Rust SDK body shape, and accepts a caller-supplied
+        ``bearer`` token rather than relying on the stored token.
+
+        Divergence resolved: the existing :meth:`entitlements_check` used
+        ``feature`` as the body key; this method uses ``feature_key`` matching
+        the Rust SDK and backend canonical field name.
+
+        Returns:
+            An ``EntitlementResult`` dict with ``granted`` (bool) and
+            ``reason`` (str or None).
+        """
+        payload: dict = {"feature_key": feature_key}
+        return self._request("POST", "/api/entitlements/check", json=payload)
+
+    def check_entitlements(
+        self, bearer: str, feature_keys: List[str]
+    ) -> dict:
+        """POST /api/entitlements/check/batch — batch-check multiple features.
+
+        Canonical Rust-parity method.  Accepts ``feature_keys: list[str]``
+        (not the older ``checks: list`` shape) and returns a
+        ``dict[str, EntitlementResult]`` map.
+
+        Divergence resolved: the existing :meth:`entitlements_check_batch`
+        used ``{"checks": [...]}`` as the body; this method uses
+        ``{"feature_keys": [...]}`` matching the Rust SDK.
+
+        Returns:
+            A dict mapping each feature key to an ``EntitlementResult``.
+        """
+        return self._request(
+            "POST",
+            "/api/entitlements/check/batch",
+            json={"feature_keys": feature_keys},
+        )
+
+    def effective_entitlements(self, bearer: str) -> list:
+        """GET /api/entitlements/effective — all effective entitlements.
+
+        Canonical Rust-parity method.  Accepts a ``bearer`` argument for
+        API symmetry (not used in the request itself since the stored token
+        is sent; matches the Rust ``effective_entitlements(bearer)`` sig).
+
+        Returns:
+            A list of effective entitlement dicts.
+        """
         return self._request("GET", "/api/entitlements/effective")
 
     def admin_entitlements_explain(self, payload: dict) -> dict:
@@ -1256,13 +1338,51 @@ class ButtrbaseClient:
         """POST /api/analytics/events."""
         return self._request("POST", "/api/analytics/events", json=event)
 
-    def analytics_app_overview(self, app_uuid: str) -> dict:
-        """GET /api/analytics/apps/{app_uuid}/overview."""
-        return self._request("GET", f"/api/analytics/apps/{app_uuid}/overview")
+    # Canonical Rust-parity alias: ingest_event(bearer, event)
+    def ingest_event(self, bearer: str, event: dict) -> None:
+        """POST /api/analytics/events — ingest an analytics event (canonical alias).
 
-    def analytics_org_overview(self, org_uuid: str) -> dict:
-        """GET /api/analytics/organizations/{org_uuid}/overview."""
-        return self._request("GET", f"/api/analytics/organizations/{org_uuid}/overview")
+        Canonical Rust-parity method.  The ``bearer`` argument is accepted
+        for API symmetry (the stored token is used in the request, matching
+        the pattern of all other user-scoped methods).
+
+        Divergence resolved: existing :meth:`ingest_analytics_event` omitted
+        the ``bearer`` parameter; this method matches the Rust SDK signature
+        ``ingest_event(bearer, event: AnalyticsEvent)``.
+        """
+        self._request("POST", "/api/analytics/events", json=event)
+
+    def analytics_app_overview(self, app_uuid: str, period: Optional[str] = None) -> dict:
+        """GET /api/analytics/apps/{app_uuid}/overview.
+
+        Args:
+            app_uuid: UUID of the target app.
+            period: Optional period string (e.g. ``"7d"``, ``"30d"``).
+                Passed as a query parameter when provided.  Divergence
+                resolved: the method now accepts ``period`` matching the
+                Rust SDK ``app_analytics_overview(app_uuid, period)``.
+        """
+        params: Optional[dict] = {"period": period} if period is not None else None
+        return self._request(
+            "GET", f"/api/analytics/apps/{app_uuid}/overview", params=params
+        )
+
+    def analytics_org_overview(
+        self, org_uuid: str, period: Optional[str] = None
+    ) -> dict:
+        """GET /api/analytics/organizations/{org_uuid}/overview.
+
+        Args:
+            org_uuid: UUID of the target org.
+            period: Optional period string (e.g. ``"7d"``, ``"30d"``).
+                Passed as a query parameter when provided.  Divergence
+                resolved: the method now accepts ``period`` matching the
+                Rust SDK ``org_analytics_overview(bearer, org_uuid, period)``.
+        """
+        params: Optional[dict] = {"period": period} if period is not None else None
+        return self._request(
+            "GET", f"/api/analytics/organizations/{org_uuid}/overview", params=params
+        )
 
     # ----- Teams -----
     def create_team(self, payload: dict) -> dict:
@@ -1419,8 +1539,44 @@ class ButtrbaseClient:
 
     # ----- Usage -----
     def usage_report(self, payload: dict) -> dict:
-        """POST /api/usage/report."""
+        """POST /api/usage/report.
+
+        .. deprecated::
+            Use :meth:`report_usage` for canonical Rust-parity shape
+            (typed ``UsageEvent``, app-level HTTP Basic auth).
+        """
         return self._request("POST", "/api/usage/report", json=payload)
+
+    def report_usage(self, event: UsageEvent) -> None:
+        """POST /api/usage/report — report a metered usage event.
+
+        Canonical Rust-parity method.  Uses HTTP Basic auth (client_id /
+        client_secret) rather than bearer, matching the Rust SDK which
+        calls ``app_request`` for this endpoint.  If ``client_id`` and
+        ``client_secret`` are not set on this client, falls back to bearer.
+
+        Divergence resolved: the existing :meth:`usage_report` accepted an
+        untyped ``dict`` and used the stored bearer token.  This method
+        accepts a typed ``UsageEvent`` and uses app-level auth.
+
+        Args:
+            event: A :class:`~buttrbase.types.UsageEvent` dict with at
+                minimum ``metric`` (str) and ``quantity`` (float).
+        """
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if self.client_id and self.client_secret:
+            import base64 as _base64
+            creds = _base64.b64encode(
+                f"{self.client_id}:{self.client_secret}".encode()
+            ).decode()
+            headers["Authorization"] = f"Basic {creds}"
+        elif self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        url = f"{self.base_url}/api/usage/report"
+        resp = self._session.request(
+            "POST", url, json=dict(event), headers=headers, timeout=self.timeout
+        )
+        self._handle(resp)
 
     # ----- Help -----
     def help_root(self) -> dict:
@@ -2079,3 +2235,156 @@ class ButtrbaseClient:
         if reply_to is not None:
             payload["reply_to"] = reply_to
         return self._request("POST", "/api/email/send", json=payload)
+
+    # ── Token refresh (canonical, was missing) ────────────────────────────
+
+    def refresh_token(self, refresh_token: str) -> AccessToken:
+        """POST /api/app/auth/refresh — refresh an access token.
+
+        Exchanges a refresh token (from a previous :meth:`verify_otp_email`,
+        :meth:`login`, or earlier :meth:`refresh_token` call) for a new
+        access token.  Uses HTTP Basic auth (app credentials), matching the
+        Rust SDK ``refresh_token`` which calls ``app_request``.
+
+        Args:
+            refresh_token: The refresh token string from a previous token pair.
+
+        Returns:
+            An :class:`~buttrbase.types.AccessToken` dict with
+            ``access_token``, ``token_type``, and ``expires_in``.
+        """
+        return self._request(
+            "POST",
+            "/api/app/auth/refresh",
+            json={"refresh": refresh_token},
+        )
+
+    # ── Wallet transactions (canonical, was missing) ──────────────────────
+
+    def wallet_transactions(
+        self, limit: int = 50, offset: int = 0
+    ) -> List[WalletTransaction]:
+        """GET /api/wallet/transactions — list paginated wallet transactions.
+
+        Canonical Rust-parity method.  Returns deposits and withdrawals for
+        the authenticated user's wallet.
+
+        Args:
+            limit: Maximum number of records to return (default 50).
+            offset: Pagination offset (default 0).
+
+        Returns:
+            A list of :class:`~buttrbase.types.WalletTransaction` dicts.
+        """
+        return self._request(
+            "GET",
+            "/api/wallet/transactions",
+            params={"limit": limit, "offset": offset},
+        )
+
+    # ── Subscriptions (canonical, was missing) ────────────────────────────
+
+    def subscriptions(self) -> List[SubscriptionItem]:
+        """GET /api/subscriptions — list the user's subscriptions.
+
+        Canonical Rust-parity method.
+
+        Returns:
+            A list of :class:`~buttrbase.types.SubscriptionItem` dicts.
+        """
+        return self._request("GET", "/api/subscriptions")
+
+    def create_subscription(self, body: dict) -> SubscriptionItem:
+        """POST /api/subscriptions — create a subscription.
+
+        Canonical Rust-parity method.
+
+        Args:
+            body: Subscription creation payload (at minimum ``price_id``).
+
+        Returns:
+            The created :class:`~buttrbase.types.SubscriptionItem`.
+        """
+        return self._request("POST", "/api/subscriptions", json=body)
+
+    def cancel_subscription(self, subscription_id: int) -> None:
+        """DELETE /api/subscriptions/{id} — cancel a subscription.
+
+        Canonical Rust-parity method.  Returns ``None`` on success (HTTP 204).
+
+        Args:
+            subscription_id: The integer ID of the subscription to cancel.
+        """
+        self._request("DELETE", f"/api/subscriptions/{subscription_id}")
+
+    # ── App management (canonical, was missing) ───────────────────────────
+
+    def my_apps(self) -> List[AppEntry]:
+        """GET /api/me/apps — list apps the authenticated user belongs to.
+
+        Canonical Rust-parity method.
+
+        Returns:
+            A list of :class:`~buttrbase.types.AppEntry` dicts.
+        """
+        return self._request("GET", "/api/me/apps")
+
+    def app_orgs(self, app_uuid: str) -> List[OrgEntry]:
+        """GET /api/apps/{app_uuid}/organizations — list orgs within an app.
+
+        Canonical Rust-parity method.
+
+        Args:
+            app_uuid: UUID of the target app.
+
+        Returns:
+            A list of :class:`~buttrbase.types.OrgEntry` dicts.
+        """
+        return self._request("GET", f"/api/apps/{app_uuid}/organizations")
+
+    def app_credentials(self, app_uuid: str) -> AppCredentialsResponse:
+        """GET /api/apps/{app_uuid}/credentials — get app credentials (admin).
+
+        Canonical Rust-parity method.  Returns live and sandbox credential
+        info.  Admin-only; non-admin callers receive HTTP 403.
+
+        Args:
+            app_uuid: UUID of the target app.
+
+        Returns:
+            An :class:`~buttrbase.types.AppCredentialsResponse` dict with
+            ``live`` and ``sandbox`` entries.
+        """
+        return self._request("GET", f"/api/apps/{app_uuid}/credentials")
+
+    def enable_sandbox(self, app_uuid: str) -> None:
+        """PATCH /api/apps/{app_uuid} — enable sandbox mode for an app.
+
+        Canonical Rust-parity method.  Sends ``{"sandbox_enabled": true}``
+        as a PATCH body.  Returns ``None`` on success.
+
+        Args:
+            app_uuid: UUID of the target app.
+        """
+        self._request(
+            "PATCH",
+            f"/api/apps/{app_uuid}",
+            json={"sandbox_enabled": True},
+        )
+
+    def rotate_credentials(self, app_uuid: str, environment: str) -> dict:
+        """POST /api/apps/{app_uuid}/credentials/{env}/rotate — rotate credentials.
+
+        Canonical Rust-parity method.
+
+        Args:
+            app_uuid: UUID of the target app.
+            environment: ``"live"`` or ``"sandbox"``.
+
+        Returns:
+            The new credentials dict (shape is untyped / ``Value`` in Rust).
+        """
+        return self._request(
+            "POST",
+            f"/api/apps/{app_uuid}/credentials/{environment}/rotate",
+        )

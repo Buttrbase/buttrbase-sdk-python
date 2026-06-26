@@ -1607,3 +1607,518 @@ class TestTokenPrincipal:
         p = principal_from_payload(fixture)
         assert "owner" in p.roles, f"expected 'owner' in roles, got {p.roles!r}"
         assert p.email == "test@example.com", f"unexpected email: {p.email!r}"
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — refresh_token
+# ---------------------------------------------------------------------------
+
+class TestRefreshToken:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_refresh_token_ok(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200,
+                {"access_token": "new-jwt", "token_type": "Bearer", "expires_in": 3600},
+            )
+            result = self.client.refresh_token("old-refresh-tok")
+        assert result["access_token"] == "new-jwt"
+        assert result["token_type"] == "Bearer"
+        # Verify endpoint and body.
+        url, = (mock_req.call_args[0][1],)
+        assert "/api/app/auth/refresh" in url
+        sent = mock_req.call_args[1]["json"]
+        assert sent == {"refresh": "old-refresh-tok"}
+
+    def test_refresh_token_http_method_is_post(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"access_token": "x", "token_type": "Bearer", "expires_in": 3600}
+            )
+            self.client.refresh_token("tok")
+        assert mock_req.call_args[0][0] == "POST"
+
+    def test_refresh_token_401_raises(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "invalid refresh token"})
+            with pytest.raises(ButtrbaseError) as exc_info:
+                self.client.refresh_token("bad-tok")
+        assert exc_info.value.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — wallet_transactions
+# ---------------------------------------------------------------------------
+
+class TestWalletTransactions:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_wallet_transactions_default_params(self):
+        txns = [
+            {"id": 1, "type": "credit", "amount_cents": 500, "currency": "USD",
+             "description": "deposit", "created_at": "2026-01-01T00:00:00Z"},
+        ]
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, txns)
+            result = self.client.wallet_transactions()
+        assert len(result) == 1
+        assert result[0]["type"] == "credit"
+        params = mock_req.call_args[1]["params"]
+        assert params["limit"] == 50
+        assert params["offset"] == 0
+
+    def test_wallet_transactions_custom_params(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.wallet_transactions(limit=10, offset=20)
+        params = mock_req.call_args[1]["params"]
+        assert params["limit"] == 10
+        assert params["offset"] == 20
+
+    def test_wallet_transactions_url(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.wallet_transactions()
+        url = mock_req.call_args[0][1]
+        assert "/api/wallet/transactions" in url
+
+    def test_wallet_transactions_http_get(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.wallet_transactions()
+        assert mock_req.call_args[0][0] == "GET"
+
+    def test_wallet_transactions_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "unauthorized"})
+            with pytest.raises(ButtrbaseError):
+                self.client.wallet_transactions()
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — subscriptions
+# ---------------------------------------------------------------------------
+
+class TestSubscriptions:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_subscriptions_ok(self):
+        items = [
+            {"id": 1, "price_id": "price_basic", "status": "active",
+             "current_period_start": "2026-01-01T00:00:00Z",
+             "current_period_end": "2026-02-01T00:00:00Z",
+             "created_at": "2026-01-01T00:00:00Z"},
+        ]
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, items)
+            result = self.client.subscriptions()
+        assert len(result) == 1
+        assert result[0]["status"] == "active"
+
+    def test_subscriptions_http_get(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.subscriptions()
+        assert mock_req.call_args[0][0] == "GET"
+        assert "/api/subscriptions" in mock_req.call_args[0][1]
+
+    def test_subscriptions_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "unauthorized"})
+            with pytest.raises(ButtrbaseError):
+                self.client.subscriptions()
+
+    def test_create_subscription_ok(self):
+        created = {"id": 42, "price_id": "price_pro", "status": "active",
+                   "current_period_start": None, "current_period_end": None,
+                   "created_at": "2026-06-01T00:00:00Z"}
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, created)
+            result = self.client.create_subscription({"price_id": "price_pro"})
+        assert result["id"] == 42
+        assert result["price_id"] == "price_pro"
+
+    def test_create_subscription_http_post(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"id": 1, "price_id": "x", "status": "active",
+                      "current_period_start": None, "current_period_end": None,
+                      "created_at": "2026-01-01T00:00:00Z"}
+            )
+            self.client.create_subscription({"price_id": "x"})
+        assert mock_req.call_args[0][0] == "POST"
+        assert "/api/subscriptions" in mock_req.call_args[0][1]
+        assert mock_req.call_args[1]["json"] == {"price_id": "x"}
+
+    def test_create_subscription_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(400, {"message": "invalid price_id"})
+            with pytest.raises(ButtrbaseError):
+                self.client.create_subscription({"price_id": "bad"})
+
+    def test_cancel_subscription_ok(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(204, None, content=b"")
+            # Should not raise; returns None
+            result = self.client.cancel_subscription(42)
+        assert result is None or result == {}
+
+    def test_cancel_subscription_http_delete(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(204, None, content=b"")
+            self.client.cancel_subscription(99)
+        assert mock_req.call_args[0][0] == "DELETE"
+        assert "/api/subscriptions/99" in mock_req.call_args[0][1]
+
+    def test_cancel_subscription_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(404, {"message": "not found"})
+            with pytest.raises(ButtrbaseError):
+                self.client.cancel_subscription(9999)
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — app management
+# ---------------------------------------------------------------------------
+
+class TestAppManagement:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_my_apps_ok(self):
+        apps = [
+            {"app_uuid": "app-1", "name": "My App", "role": "admin",
+             "created_at": "2026-01-01T00:00:00Z"},
+        ]
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, apps)
+            result = self.client.my_apps()
+        assert len(result) == 1
+        assert result[0]["app_uuid"] == "app-1"
+
+    def test_my_apps_http_get(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.my_apps()
+        assert mock_req.call_args[0][0] == "GET"
+        assert "/api/me/apps" in mock_req.call_args[0][1]
+
+    def test_my_apps_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "unauthorized"})
+            with pytest.raises(ButtrbaseError):
+                self.client.my_apps()
+
+    def test_app_orgs_ok(self):
+        orgs = [
+            {"org_uuid": "org-1", "name": "Acme Inc", "role": "member"},
+        ]
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, orgs)
+            result = self.client.app_orgs("app-uuid-123")
+        assert len(result) == 1
+        assert result[0]["org_uuid"] == "org-1"
+
+    def test_app_orgs_url(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.app_orgs("app-uuid-123")
+        url = mock_req.call_args[0][1]
+        assert "/api/apps/app-uuid-123/organizations" in url
+
+    def test_app_orgs_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(403, {"message": "forbidden"})
+            with pytest.raises(ButtrbaseError):
+                self.client.app_orgs("app-uuid-123")
+
+    def test_app_credentials_ok(self):
+        creds = {
+            "live": {"client_id": "bb_live_cid_xyz", "environment": "live"},
+            "sandbox": {"client_id": "bb_test_cid_xyz", "environment": "sandbox"},
+        }
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, creds)
+            result = self.client.app_credentials("app-uuid-123")
+        assert result["live"]["client_id"] == "bb_live_cid_xyz"
+        assert result["sandbox"]["client_id"] == "bb_test_cid_xyz"
+
+    def test_app_credentials_url(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"live": None, "sandbox": None}
+            )
+            self.client.app_credentials("app-uuid-xyz")
+        url = mock_req.call_args[0][1]
+        assert "/api/apps/app-uuid-xyz/credentials" in url
+
+    def test_app_credentials_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(403, {"message": "admin only"})
+            with pytest.raises(ButtrbaseError):
+                self.client.app_credentials("app-uuid-123")
+
+    def test_enable_sandbox_ok(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"sandbox_enabled": True})
+            self.client.enable_sandbox("app-uuid-123")
+        assert mock_req.call_args[0][0] == "PATCH"
+        url = mock_req.call_args[0][1]
+        assert "/api/apps/app-uuid-123" in url
+        sent = mock_req.call_args[1]["json"]
+        assert sent == {"sandbox_enabled": True}
+
+    def test_enable_sandbox_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(403, {"message": "forbidden"})
+            with pytest.raises(ButtrbaseError):
+                self.client.enable_sandbox("app-uuid-123")
+
+    def test_rotate_credentials_live(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"client_id": "new-cid", "client_secret": "new-sk"}
+            )
+            result = self.client.rotate_credentials("app-uuid-123", "live")
+        assert result["client_id"] == "new-cid"
+        assert mock_req.call_args[0][0] == "POST"
+        url = mock_req.call_args[0][1]
+        assert "/api/apps/app-uuid-123/credentials/live/rotate" in url
+
+    def test_rotate_credentials_sandbox(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"client_id": "new-test-cid", "client_secret": "new-test-sk"}
+            )
+            self.client.rotate_credentials("app-uuid-123", "sandbox")
+        url = mock_req.call_args[0][1]
+        assert "/api/apps/app-uuid-123/credentials/sandbox/rotate" in url
+
+    def test_rotate_credentials_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(403, {"message": "forbidden"})
+            with pytest.raises(ButtrbaseError):
+                self.client.rotate_credentials("app-uuid-123", "live")
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — canonical entitlement shapes
+# ---------------------------------------------------------------------------
+
+class TestCanonicalEntitlements:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_check_entitlement_uses_feature_key_field(self):
+        """Canonical Rust shape uses 'feature_key' not 'feature'."""
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"granted": True, "reason": None}
+            )
+            result = self.client.check_entitlement("user-bearer", "advanced_analytics")
+        assert result["granted"] is True
+        sent = mock_req.call_args[1]["json"]
+        assert "feature_key" in sent
+        assert sent["feature_key"] == "advanced_analytics"
+        assert "feature" not in sent  # NOT the old divergent field
+
+    def test_check_entitlement_not_granted(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200, {"granted": False, "reason": "subscription_required"}
+            )
+            result = self.client.check_entitlement("tok", "premium_feature")
+        assert result["granted"] is False
+        assert result["reason"] == "subscription_required"
+
+    def test_check_entitlement_http_post(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"granted": True, "reason": None})
+            self.client.check_entitlement("tok", "feat")
+        assert mock_req.call_args[0][0] == "POST"
+        assert "/api/entitlements/check" in mock_req.call_args[0][1]
+
+    def test_check_entitlement_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "unauthorized"})
+            with pytest.raises(ButtrbaseError):
+                self.client.check_entitlement("bad-tok", "feat")
+
+    def test_check_entitlements_uses_feature_keys_field(self):
+        """Canonical Rust shape uses 'feature_keys' not 'checks'."""
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(
+                200,
+                {
+                    "advanced_analytics": {"granted": True, "reason": None},
+                    "premium_export": {"granted": False, "reason": "subscription_required"},
+                },
+            )
+            result = self.client.check_entitlements(
+                "user-bearer", ["advanced_analytics", "premium_export"]
+            )
+        assert result["advanced_analytics"]["granted"] is True
+        assert result["premium_export"]["granted"] is False
+        sent = mock_req.call_args[1]["json"]
+        assert "feature_keys" in sent
+        assert sent["feature_keys"] == ["advanced_analytics", "premium_export"]
+        assert "checks" not in sent  # NOT the old divergent field
+
+    def test_check_entitlements_http_post(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            self.client.check_entitlements("tok", ["a", "b"])
+        assert mock_req.call_args[0][0] == "POST"
+        assert "/api/entitlements/check/batch" in mock_req.call_args[0][1]
+
+    def test_check_entitlements_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(401, {"message": "unauthorized"})
+            with pytest.raises(ButtrbaseError):
+                self.client.check_entitlements("bad", ["feat"])
+
+    def test_effective_entitlements_ok(self):
+        items = [{"feature_key": "basic_access", "granted": True}]
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, items)
+            result = self.client.effective_entitlements("user-bearer")
+        assert result == items
+
+    def test_effective_entitlements_http_get(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, [])
+            self.client.effective_entitlements("tok")
+        assert mock_req.call_args[0][0] == "GET"
+        assert "/api/entitlements/effective" in mock_req.call_args[0][1]
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — report_usage (canonical, app-level Basic auth)
+# ---------------------------------------------------------------------------
+
+class TestReportUsage:
+    def setup_method(self):
+        self.client = ButtrbaseClient(
+            base_url="https://example.com",
+            client_id="bb_test_cid_test",
+            client_secret="bb_test_sk_test",
+            timeout=5.0,
+        )
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_report_usage_sends_basic_auth(self):
+        import base64
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            self.client.report_usage({"metric": "api_calls", "quantity": 1.0})
+        headers = mock_req.call_args[1]["headers"]
+        assert "Authorization" in headers
+        auth = headers["Authorization"]
+        assert auth.startswith("Basic ")
+        # Decode and verify it contains client_id:client_secret
+        decoded = base64.b64decode(auth[6:]).decode()
+        assert "bb_test_cid_test" in decoded
+        assert "bb_test_sk_test" in decoded
+
+    def test_report_usage_posts_to_correct_url(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            self.client.report_usage({"metric": "api_calls", "quantity": 1.0})
+        assert mock_req.call_args[0][0] == "POST"
+        url = mock_req.call_args[0][1]
+        assert "/api/usage/report" in url
+
+    def test_report_usage_sends_event_body(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            self.client.report_usage({"metric": "storage_gb", "quantity": 50.5, "org_uuid": "org-1"})
+        sent = mock_req.call_args[1]["json"]
+        assert sent["metric"] == "storage_gb"
+        assert sent["quantity"] == 50.5
+        assert sent["org_uuid"] == "org-1"
+
+    def test_report_usage_error(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(400, {"message": "invalid metric"})
+            with pytest.raises(ButtrbaseError):
+                self.client.report_usage({"metric": "", "quantity": 0})
+
+    def test_report_usage_fallback_bearer_when_no_creds(self):
+        client = _make_client("bearer-tok")
+        with patch.object(client._session, "request") as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            client.report_usage({"metric": "api_calls", "quantity": 1.0})
+        headers = mock_req.call_args[1]["headers"]
+        assert headers["Authorization"] == "Bearer bearer-tok"
+
+
+# ---------------------------------------------------------------------------
+# Parity methods — analytics with period param
+# ---------------------------------------------------------------------------
+
+class TestAnalyticsPeriodParam:
+    def setup_method(self):
+        self.client = _make_client()
+
+    def _patch(self):
+        return patch.object(self.client._session, "request")
+
+    def test_analytics_app_overview_no_period(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"users": 100})
+            self.client.analytics_app_overview("app-uuid-1")
+        params = mock_req.call_args[1].get("params")
+        assert params is None  # no period → no params
+
+    def test_analytics_app_overview_with_period(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"users": 200})
+            result = self.client.analytics_app_overview("app-uuid-1", period="7d")
+        assert result["users"] == 200
+        params = mock_req.call_args[1]["params"]
+        assert params["period"] == "7d"
+
+    def test_analytics_org_overview_no_period(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"events": 50})
+            self.client.analytics_org_overview("org-uuid-1")
+        params = mock_req.call_args[1].get("params")
+        assert params is None
+
+    def test_analytics_org_overview_with_period(self):
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {"events": 75})
+            self.client.analytics_org_overview("org-uuid-1", period="30d")
+        params = mock_req.call_args[1]["params"]
+        assert params["period"] == "30d"
+
+    def test_ingest_event_alias(self):
+        """ingest_event(bearer, event) is the canonical alias for ingest_analytics_event."""
+        with self._patch() as mock_req:
+            mock_req.return_value = _make_response(200, {})
+            self.client.ingest_event("user-bearer", {"event_type": "click", "payload": {}})
+        assert mock_req.call_args[0][0] == "POST"
+        assert "/api/analytics/events" in mock_req.call_args[0][1]
+        sent = mock_req.call_args[1]["json"]
+        assert sent["event_type"] == "click"

@@ -1,5 +1,96 @@
 # Changelog
 
+## 0.7.0 — Rust SDK feature parity (wallet, subscriptions, app-management, entitlements)
+
+Additive release closing all hard-missing method gaps and resolving shape/naming
+divergences identified in the 2026-06-26 parity audit.  No breaking changes —
+all existing public methods are unchanged.
+
+### Added
+
+- **`refresh_token(refresh_token) -> AccessToken`** — exchange a refresh token
+  for a new access token. `POST /api/app/auth/refresh`. Previously missing;
+  `TokenPair` carried a `refresh_token` field with no method to use it.
+
+- **`wallet_transactions(limit=50, offset=0) -> list[WalletTransaction]`** —
+  paginated wallet transaction listing. `GET /api/wallet/transactions`.
+
+- **`subscriptions() -> list[SubscriptionItem]`** — list user subscriptions.
+  `GET /api/subscriptions`.
+
+- **`create_subscription(body) -> SubscriptionItem`** — create a subscription.
+  `POST /api/subscriptions`.
+
+- **`cancel_subscription(subscription_id: int) -> None`** — cancel by integer ID.
+  `DELETE /api/subscriptions/{id}`.
+
+- **`my_apps() -> list[AppEntry]`** — list apps the authenticated user belongs to.
+  `GET /api/me/apps`.
+
+- **`app_orgs(app_uuid) -> list[OrgEntry]`** — list orgs within an app.
+  `GET /api/apps/{app_uuid}/organizations`.
+
+- **`app_credentials(app_uuid) -> AppCredentialsResponse`** — get live/sandbox
+  credentials (admin only). `GET /api/apps/{app_uuid}/credentials`.
+
+- **`enable_sandbox(app_uuid) -> None`** — enable sandbox mode for an app.
+  `PATCH /api/apps/{app_uuid}` with `{"sandbox_enabled": true}`.
+
+- **`rotate_credentials(app_uuid, environment) -> dict`** — rotate credentials
+  for `"live"` or `"sandbox"`. `POST /api/apps/{app_uuid}/credentials/{env}/rotate`.
+
+- **`check_entitlement(bearer, feature_key) -> EntitlementResult`** — canonical
+  single-feature check. Uses `feature_key` body field (not `feature`).
+  Shape divergence resolved.
+
+- **`check_entitlements(bearer, feature_keys) -> dict`** — canonical batch check.
+  Uses `{"feature_keys": [...]}` body (not `{"checks": [...]}`).
+  Shape divergence resolved.
+
+- **`effective_entitlements(bearer) -> list`** — canonical alias for
+  `entitlements_effective()`. Accepts `bearer` parameter for API symmetry.
+
+- **`report_usage(event: UsageEvent) -> None`** — canonical usage-event reporting
+  using **HTTP Basic auth** (client_id:client_secret) matching the Rust SDK.
+  Divergence resolved: old `usage_report(payload)` used bearer token.
+
+- **`ingest_event(bearer, event) -> None`** — canonical alias for
+  `ingest_analytics_event(event)` matching the Rust SDK `ingest_event(bearer, event)`.
+
+- **`analytics_app_overview(app_uuid, period=None)`** — now accepts an optional
+  `period` query param (e.g. `"7d"`, `"30d"`), matching the Rust SDK.
+  Previously missing `period`. Backwards compatible — `period=None` omits the param.
+
+- **`analytics_org_overview(org_uuid, period=None)`** — same period-param addition.
+
+### New types
+
+- `AccessToken` — `{ access_token, token_type, expires_in? }`.
+- `WalletTransaction` — wallet transaction row.
+- `WalletSummary` — wallet balance (already used by `wallet()`, now exported).
+- `SubscriptionItem` — subscription row.
+- `AppEntry` — app row from `my_apps()`.
+- `OrgEntry` — org row from `app_orgs()`.
+- `AppCredentialInfo` / `AppCredentialsResponse` — credential shapes.
+- `EntitlementResult` — `{ granted, reason? }` canonical shape.
+- `UsageEvent` — typed usage event for `report_usage()`.
+
+### Deprecated (old methods kept for backwards compatibility)
+
+- `entitlements_check(feature, org_uuid?)` → use `check_entitlement(bearer, feature_key)`
+- `entitlements_check_batch(checks)` → use `check_entitlements(bearer, feature_keys)`
+- `entitlements_effective()` → use `effective_entitlements(bearer)`
+- `usage_report(payload)` → use `report_usage(event: UsageEvent)`
+- `ingest_analytics_event(event)` → use `ingest_event(bearer, event)`
+
+### Tests
+
+- 50 new unit tests in `tests/test_unit.py` covering every new method:
+  URL/verb/body assertions, parsed result shape, and error propagation.
+  Full suite: 236 tests, all passing.
+
+---
+
 ## 0.6.0 — JWKS-backed RS256 Verifier (feature parity with Rust SDK)
 
 Mirrors Rust SDK `Verifier`. Strictly additive — no existing fields removed or

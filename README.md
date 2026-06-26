@@ -106,6 +106,83 @@ print(principal.org_id)  # "22222222-..."
 All four names (`ClaimsData`, `Claims`, `TokenPrincipal`, `principal_from_payload`)
 are also importable directly from `buttrbase`.
 
+## Token Refresh
+
+```python
+# Exchange a refresh token for a new access token
+# (token is from verify_otp_email / login / finalize_registration)
+token_data = client.refresh_token(refresh_token_string)
+client.access_token = token_data["access_token"]
+```
+
+## Wallet & Subscriptions
+
+```python
+# Wallet balance
+summary = client.wallet()
+
+# Paginated transaction history
+txns = client.wallet_transactions(limit=25, offset=0)
+
+# List subscriptions
+subs = client.subscriptions()
+
+# Create a subscription
+sub = client.create_subscription({"price_id": "price_pro_monthly"})
+
+# Cancel by integer ID
+client.cancel_subscription(sub["id"])
+```
+
+## App Management (admin)
+
+```python
+# List apps the authenticated user belongs to
+apps = client.my_apps()
+
+# Orgs within an app
+orgs = client.app_orgs(app_uuid="018f1234-...")
+
+# Credentials for an app (admin only)
+creds = client.app_credentials(app_uuid="018f1234-...")
+# creds["live"]["client_id"], creds["sandbox"]["client_id"]
+
+# Enable sandbox mode
+client.enable_sandbox(app_uuid="018f1234-...")
+
+# Rotate credentials for an environment
+new_creds = client.rotate_credentials(app_uuid="018f1234-...", environment="live")
+```
+
+## Entitlements (canonical shapes)
+
+```python
+# Single feature check — canonical shape (feature_key field)
+result = client.check_entitlement(bearer_token, "advanced_analytics")
+if result["granted"]:
+    ...
+
+# Batch check — canonical shape (feature_keys list)
+results = client.check_entitlements(bearer_token, ["feature_a", "feature_b"])
+# results["feature_a"] -> {"granted": bool, "reason": str|None}
+
+# All effective entitlements
+entitlements = client.effective_entitlements(bearer_token)
+```
+
+## Usage Reporting (app-level Basic auth)
+
+```python
+# report_usage uses HTTP Basic auth (client_id:client_secret),
+# matching the Rust SDK.  Construct with credentials for this to work.
+client = ButtrbaseClient(client_id="...", client_secret="...")
+client.report_usage({
+    "metric": "api_calls",
+    "quantity": 1.0,
+    "org_uuid": "org-uuid-here",  # optional
+})
+```
+
 ## JWKS-backed RS256 Verifier
 
 *Added in 0.6.0 — feature parity with the Rust SDK `Verifier`. Requires

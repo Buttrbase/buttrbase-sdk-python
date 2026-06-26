@@ -541,3 +541,104 @@ class InvitationListItem(TypedDict):
     expires_at: str
     accepted_at: Optional[str]
     revoked_at: Optional[str]
+
+
+# ── Token refresh ─────────────────────────────────────────────────────────────
+
+
+class AccessToken(TypedDict):
+    """Response from POST /api/app/auth/refresh."""
+
+    access_token: str
+    token_type: str
+    expires_in: Optional[int]
+
+
+# ── Wallet / Commerce ─────────────────────────────────────────────────────────
+
+
+class WalletSummary(TypedDict):
+    """Response from GET /api/wallet."""
+
+    balance_cents: int
+    budget_cents: Optional[int]
+    currency: str
+
+
+class WalletTransaction(TypedDict):
+    """A single row from GET /api/wallet/transactions."""
+
+    id: int
+    type: str            # "credit" | "debit"
+    amount_cents: int
+    currency: str
+    description: Optional[str]
+    created_at: str
+
+
+class SubscriptionItem(TypedDict):
+    """A single subscription row returned by subscriptions endpoints."""
+
+    id: int
+    price_id: str
+    status: str
+    current_period_start: Optional[str]
+    current_period_end: Optional[str]
+    created_at: str
+
+
+# ── App management ────────────────────────────────────────────────────────────
+
+
+class AppEntry(TypedDict):
+    """A row from GET /api/me/apps."""
+
+    app_uuid: str
+    name: str
+    role: Optional[str]
+    created_at: Optional[str]
+
+
+class OrgEntry(TypedDict):
+    """A row from GET /api/apps/{app_uuid}/organizations."""
+
+    org_uuid: str
+    name: str
+    role: Optional[str]
+
+
+class AppCredentialInfo(TypedDict):
+    """A single environment credential entry inside AppCredentialsResponse."""
+
+    client_id: str
+    environment: str  # "live" | "sandbox"
+
+
+class AppCredentialsResponse(TypedDict):
+    """Response from GET /api/apps/{app_uuid}/credentials."""
+
+    live: Optional[AppCredentialInfo]
+    sandbox: Optional[AppCredentialInfo]
+
+
+# ── Entitlements (canonical shapes) ─────────────────────────────────────────
+
+
+class EntitlementResult(TypedDict):
+    """Granted/reason pair returned by entitlement-check endpoints."""
+
+    granted: bool
+    reason: Optional[str]
+
+
+# ── Usage event (canonical shape) ────────────────────────────────────────────
+
+
+class UsageEvent(TypedDict, total=False):
+    """Body for POST /api/usage/report (app-level Basic auth)."""
+
+    metric: str          # required
+    quantity: float      # required
+    org_uuid: Optional[str]
+    app_uuid: Optional[str]
+    timestamp: Optional[str]  # ISO-8601; server uses now() if absent
