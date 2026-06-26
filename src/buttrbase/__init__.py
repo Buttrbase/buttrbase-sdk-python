@@ -2,6 +2,8 @@
 from .client import ButtrbaseClient
 from .errors import ButtrbaseError
 from . import webhooks
+from . import verify
+from .verify import ClaimsData, Claims, TokenPrincipal, principal_from_payload
 from .types import (
     AcceptInvitationResponse,
     AppRpConfig,
@@ -41,6 +43,12 @@ __all__ = [
     "ButtrbaseClient",
     "ButtrbaseError",
     "webhooks",
+    # Token claims enrichment (data-envelope: roles / email)
+    "verify",
+    "ClaimsData",
+    "Claims",
+    "TokenPrincipal",
+    "principal_from_payload",
     # Legacy types
     "Credential",
     "CreateCredentialResponse",
@@ -84,4 +92,4 @@ __all__ = [
     "AcceptInvitationResponse",
     "InvitationListItem",
 ]
-__version__ = "0.3.1"
+__version__ = "0.5.0"

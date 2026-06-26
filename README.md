@@ -81,6 +81,31 @@ client.authenticate()
 You can still pass `access_token="<token>"` directly if you obtain one out
 of band; in that case the SDK uses it as-is.
 
+## Token Claims Enrichment (data envelope: roles / email)
+
+*Added in 0.5.0 — mirrors Rust SDK 0.6.0.  Additive; no existing behaviour changed.*
+
+buttrbase access tokens carry an optional `data` object containing the user's
+`roles` (a comma/space-delimited string) and `email`.  Use
+`principal_from_payload` to surface these from a decoded JWT payload without
+any additional dependencies:
+
+```python
+from buttrbase.verify import principal_from_payload
+
+# `payload` is the decoded JWT body — a plain dict from e.g. PyJWT.decode().
+principal = principal_from_payload(payload)
+
+print(principal.roles)   # ["owner"] or ["org_admin", "leadership"] etc.
+print(principal.email)   # "user@example.com" or None
+print(principal.scopes)  # ["read:messages", "write:messages"]
+print(principal.user_id) # "11111111-..."
+print(principal.org_id)  # "22222222-..."
+```
+
+All four names (`ClaimsData`, `Claims`, `TokenPrincipal`, `principal_from_payload`)
+are also importable directly from `buttrbase`.
+
 ## Authentication
 
 ### Register

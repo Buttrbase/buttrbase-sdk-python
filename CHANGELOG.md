@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0 — token claims enrichment (data-envelope: roles / email)
+
+Mirrors Rust SDK 0.6.0.  Strictly additive — no existing fields removed or renamed.
+
+### Added
+
+- `buttrbase.verify` module: `ClaimsData`, `Claims`, `TokenPrincipal`,
+  `principal_from_payload`.
+- `ClaimsData` carries the optional `roles`, `email`, `org_uuid`, and
+  `user_uuid` fields from the buttrbase token `data` envelope.
+- `Claims.from_dict(payload)` parses a decoded JWT payload (a plain `dict`)
+  into a typed `Claims` object, populating `data` when the envelope is present.
+- `TokenPrincipal.from_claims(claims)` derives the application-level principal:
+  `roles: list[str]` (split from `data.roles` on commas and spaces, matching
+  the Rust SDK split behaviour) and `email: str | None`.
+- `principal_from_payload(payload)` — one-shot helper combining both steps.
+- All four names re-exported from the top-level `buttrbase` package.
+- No new runtime dependencies.
+
 ## 0.4.0 — magic-link cross-app federation
 
 ### Breaking

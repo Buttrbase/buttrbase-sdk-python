@@ -1398,3 +1398,212 @@ class TestTypes:
     def test_geo_response(self):
         resp: GeoResponse = {"ip": "1.2.3.4", "country": "US", "timezone": "UTC"}
         assert resp["ip"] == "1.2.3.4"
+
+
+# ---------------------------------------------------------------------------
+# Token claims enrichment (verify module) — data-envelope: roles / email
+# ---------------------------------------------------------------------------
+
+import json
+import os
+import pathlib
+
+from buttrbase.verify import (
+    Claims,
+    ClaimsData,
+    TokenPrincipal,
+    principal_from_payload,
+)
+
+# Resolve the fixture relative to the Rust SDK repo alongside this one.
+_FIXTURE_PATH = pathlib.Path(__file__).parent.parent.parent / (
+    "buttrbase-sdk-rust/tests/fixtures/access_token_claims.json"
+)
+
+
+def _load_fixture() -> dict:
+    """Load access_token_claims.json; skip gracefully if the path is absent."""
+    if _FIXTURE_PATH.exists():
+        return json.loads(_FIXTURE_PATH.read_text())
+    # Inline minimal fixture so tests are self-contained in any checkout.
+    return {
+        "sub": "11111111-1111-1111-1111-111111111111",
+        "org": "22222222-2222-2222-2222-222222222222",
+        "exp": 1750003600,
+        "iat": 1750000000,
+        "scope": ["read:messages", "write:messages"],
+        "data": {
+            "email": "test@example.com",
+            "roles": "owner",
+            "org_uuid": "22222222-2222-2222-2222-222222222222",
+            "user_uuid": "11111111-1111-1111-1111-111111111111",
+        },
+    }
+
+
+class TestClaimsDataEnrichment:
+    """Unit tests for ClaimsData — additive data-envelope parsing."""
+
+    def test_claims_data_from_full_dict(self):
+        raw = {
+            "roles": "owner",
+            "email": "test@example.com",
+            "org_uuid": "22222222-2222-2222-2222-222222222222",
+            "user_uuid": "11111111-1111-1111-1111-111111111111",
+        }
+        cd = ClaimsData.from_dict(raw)
+        assert cd.roles == "owner"
+        assert cd.email == "test@example.com"
+        assert cd.org_uuid == "22222222-2222-2222-2222-222222222222"
+        assert cd.user_uuid == "11111111-1111-1111-1111-111111111111"
+
+    def test_claims_data_missing_fields_are_none(self):
+        cd = ClaimsData.from_dict({})
+        assert cd.roles is None
+        assert cd.email is None
+        assert cd.org_uuid is None
+        assert cd.user_uuid is None
+
+    def test_claims_data_partial(self):
+        cd = ClaimsData.from_dict({"email": "a@b.com"})
+        assert cd.email == "a@b.com"
+        assert cd.roles is None
+
+
+class TestClaimsFromDict:
+    """Unit tests for Claims.from_dict — JWT payload parsing."""
+
+    def test_minimal_payload(self):
+        payload = {
+            "sub": "00000000-0000-0000-0000-000000000000",
+            "org": "00000000-0000-0000-0000-000000000001",
+            "exp": 9999999999,
+            "iat": 0,
+        }
+        claims = Claims.from_dict(payload)
+        assert claims.sub == "00000000-0000-0000-0000-000000000000"
+        assert claims.org == "00000000-0000-0000-0000-000000000001"
+        assert claims.scope == []
+        assert claims.data is None
+
+    def test_scope_populated(self):
+        payload = {
+            "sub": "aaa",
+            "org": "bbb",
+            "exp": 1,
+            "iat": 0,
+            "scope": ["read:users", "write:users"],
+        }
+        claims = Claims.from_dict(payload)
+        assert claims.scope == ["read:users", "write:users"]
+
+    def test_data_envelope_parsed(self):
+        payload = {
+            "sub": "aaa",
+            "org": "bbb",
+            "exp": 1,
+            "iat": 0,
+            "data": {"roles": "owner", "email": "test@example.com"},
+        }
+        claims = Claims.from_dict(payload)
+        assert claims.data is not None
+        assert claims.data.roles == "owner"
+        assert claims.data.email == "test@example.com"
+
+    def test_non_dict_data_envelope_ignored(self):
+        """A data field that is not a dict should not crash; data should be None."""
+        payload = {"sub": "a", "org": "b", "exp": 1, "iat": 0, "data": "not-a-dict"}
+        claims = Claims.from_dict(payload)
+        assert claims.data is None
+
+    def test_fixture_claims(self):
+        """Round-trip the shared access_token_claims.json fixture."""
+        fixture = _load_fixture()
+        claims = Claims.from_dict(fixture)
+        assert claims.data is not None
+        assert claims.data.roles == "owner"
+        assert claims.data.email == "test@example.com"
+
+
+class TestTokenPrincipal:
+    """Unit tests for TokenPrincipal — auth-context from claims."""
+
+    def test_principal_roles_split_single(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            data=ClaimsData(roles="owner", email="x@y.com"),
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == ["owner"]
+        assert p.email == "x@y.com"
+
+    def test_principal_roles_split_comma_delimited(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            data=ClaimsData(roles="org_admin,leadership"),
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == ["org_admin", "leadership"]
+
+    def test_principal_roles_split_space_delimited(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            data=ClaimsData(roles="a b c"),
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == ["a", "b", "c"]
+
+    def test_principal_roles_split_mixed_delimiter(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            data=ClaimsData(roles="owner, org_admin,  leadership"),
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == ["owner", "org_admin", "leadership"]
+
+    def test_principal_no_data_gives_empty_roles_and_no_email(self):
+        claims = Claims(sub="u1", org="o1", exp=1, iat=0, data=None)
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == []
+        assert p.email is None
+
+    def test_principal_data_no_roles(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            data=ClaimsData(roles=None, email="a@b.com"),
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.roles == []
+        assert p.email == "a@b.com"
+
+    def test_principal_copies_scopes(self):
+        claims = Claims(
+            sub="u1", org="o1", exp=1, iat=0,
+            scope=["read:pages", "write:pages"],
+            data=None,
+        )
+        p = TokenPrincipal.from_claims(claims)
+        assert p.scopes == ["read:pages", "write:pages"]
+
+    def test_principal_from_payload_one_shot(self):
+        payload = {
+            "sub": "u1",
+            "org": "o1",
+            "exp": 1,
+            "iat": 0,
+            "data": {"roles": "owner", "email": "test@example.com"},
+        }
+        p = principal_from_payload(payload)
+        assert "owner" in p.roles
+        assert p.email == "test@example.com"
+
+    def test_fixture_principal_roles_and_email(self):
+        """Core assertion: fixture token yields roles list + email on principal.
+
+        This is the Python mirror of the Rust SDK test
+        ``claims_expose_roles_and_email_from_data_envelope``.
+        """
+        fixture = _load_fixture()
+        p = principal_from_payload(fixture)
+        assert "owner" in p.roles, f"expected 'owner' in roles, got {p.roles!r}"
+        assert p.email == "test@example.com", f"unexpected email: {p.email!r}"
