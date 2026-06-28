@@ -490,7 +490,7 @@ class RegistrationResult(TypedDict):
 
 
 class CreateInvitationRequest(TypedDict, total=False):
-    """Body for POST /api/v1/organizations/{org_uuid}/invitations."""
+    """Body for POST /api/organizations/{org_uuid}/invitations."""
 
     email: str
     role: str
@@ -498,7 +498,7 @@ class CreateInvitationRequest(TypedDict, total=False):
 
 
 class InvitationResponse(TypedDict):
-    """Response from POST /api/v1/organizations/{org_uuid}/invitations.
+    """Response from POST /api/organizations/{org_uuid}/invitations.
 
     The plaintext ``token`` is shown once — the server does not store it.
     """
@@ -513,7 +513,7 @@ class InvitationResponse(TypedDict):
 
 
 class InvitationPreview(TypedDict):
-    """Response from GET /api/v1/invitations/{token}/preview."""
+    """Response from GET /api/auth/invitations/{token}."""
 
     org_uuid: str
     org_name: str
@@ -525,7 +525,7 @@ class InvitationPreview(TypedDict):
 
 
 class AcceptInvitationResponse(TypedDict):
-    """Response from POST /api/v1/invitations/{token}/accept."""
+    """Response from POST /api/auth/invitations/{token}/accept."""
 
     org_uuid: str
     org_name: str
@@ -533,7 +533,7 @@ class AcceptInvitationResponse(TypedDict):
 
 
 class InvitationListItem(TypedDict):
-    """A row from GET /api/v1/organizations/{org_uuid}/invitations."""
+    """A row from GET /api/organizations/{org_uuid}/invitations."""
 
     id: int
     email: Optional[str]

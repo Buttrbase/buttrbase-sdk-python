@@ -899,43 +899,43 @@ class ButtrbaseClient:
     def create_invitation(
         self, org_uuid: str, req: CreateInvitationRequest
     ) -> InvitationResponse:
-        """POST /api/v1/organizations/{org_uuid}/invitations.
+        """POST /api/organizations/{org_uuid}/invitations.
 
         The plaintext token in the response is shown once.
         """
         return self._request(
-            "POST", f"/api/v1/organizations/{org_uuid}/invitations",
+            "POST", f"/api/organizations/{org_uuid}/invitations",
             json=dict(req), auth=True
         )
 
     def preview_invitation(self, token: str) -> InvitationPreview:
-        """GET /api/v1/invitations/{token}/preview — public, no auth."""
+        """GET /api/auth/invitations/{token} — public, no auth."""
         return self._request(
-            "GET", f"/api/v1/invitations/{token}/preview",
+            "GET", f"/api/auth/invitations/{token}",
             auth=False
         )
 
     def accept_invitation_v2(self, token: str) -> AcceptInvitationResponse:
-        """POST /api/v1/invitations/{token}/accept — for already-authenticated users.
+        """POST /api/auth/invitations/{token}/accept — for already-authenticated users.
 
         New users should use finalize_registration with OrgChoice accept_invite.
         """
         return self._request(
-            "POST", f"/api/v1/invitations/{token}/accept",
+            "POST", f"/api/auth/invitations/{token}/accept",
             auth=True
         )
 
     def list_invitations(self, org_uuid: str) -> List[InvitationListItem]:
-        """GET /api/v1/organizations/{org_uuid}/invitations."""
+        """GET /api/organizations/{org_uuid}/invitations."""
         return self._request(
-            "GET", f"/api/v1/organizations/{org_uuid}/invitations",
+            "GET", f"/api/organizations/{org_uuid}/invitations",
             auth=True
         )
 
     def revoke_invitation(self, org_uuid: str, invitation_id: int) -> None:
-        """DELETE /api/v1/organizations/{org_uuid}/invitations/{invitation_id}."""
+        """DELETE /api/organizations/{org_uuid}/invitations/{invitation_id}."""
         self._request(
-            "DELETE", f"/api/v1/organizations/{org_uuid}/invitations/{invitation_id}",
+            "DELETE", f"/api/organizations/{org_uuid}/invitations/{invitation_id}",
             auth=True
         )
 
