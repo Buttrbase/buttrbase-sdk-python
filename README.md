@@ -661,6 +661,24 @@ Errors are raised as `buttrbase.ButtrbaseError` with `status_code`, `code`, `det
 
 See https://buttrbase.com/docs for the full API reference.
 
+## Tutorials
+
+The full app-integration tutorial series (01–06: provisioning, OAuth, API keys from a backend, browser→desktop handoff, passwordless, passkeys) lives at https://buttrbase.com/docs/tutorials.
+
+### Deployment & Federation
+
+A Python/FastAPI/Django service verifies ButtrBase RS256 tokens (the SDK's `verify` path) the same way regardless of where the backend runs — these deploy targets are where your token issuer lives.
+
+- [Deploy with Helm](https://buttrbase.com/docs/deployment/deploy-with-helm) — the runnable substrate every other deploy path wraps
+- [GCP Marketplace](https://buttrbase.com/docs/deployment/gcp-marketplace)
+- [AWS Marketplace](https://buttrbase.com/docs/deployment/aws-marketplace)
+- [Azure Marketplace](https://buttrbase.com/docs/deployment/azure-marketplace)
+- [OpenShift](https://buttrbase.com/docs/deployment/openshift-operator)
+- [DigitalOcean](https://buttrbase.com/docs/deployment/digitalocean-1click)
+- [Terraform Module](https://buttrbase.com/docs/deployment/terraform-module)
+- [Self-Host On-Prem](https://buttrbase.com/docs/deployment/self-host-on-prem)
+- [Set Up Federation](https://buttrbase.com/docs/deployment/set-up-federation) — register in the directory, exchange trust, open cross-org shared channels
+
 ## OAuth Configs (admin)
 
 ```python
