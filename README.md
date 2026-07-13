@@ -518,6 +518,27 @@ app_overview = client.analytics_app_overview("app-uuid")
 org_overview = client.analytics_org_overview("org-uuid")
 ```
 
+## Organization Invitations
+
+Generate and consume secure `gv_tkn_` prefixed invitation tokens to securely onboard users with strict role bindings.
+
+```python
+# 1. Generate an invitation (Admin only)
+invite = client.create_invitation("org-uuid", {
+    "email": "new.hire@example.com",
+    "role": "member",
+    "teams": ["engineering"]
+})
+print(invite["token"]) # e.g. "gv_tkn_8a9b2c3d..."
+
+# 2. Preview the invitation (Unauthenticated, safe for public UI)
+preview = client.get_invitation_preview("gv_tkn_8a9b2c3d...")
+print(preview["org_name"], preview["role"])
+
+# 3. Accept the invitation (Requires authenticated user)
+client.accept_invitation("gv_tkn_8a9b2c3d...")
+```
+
 ## Teams
 
 ```python
