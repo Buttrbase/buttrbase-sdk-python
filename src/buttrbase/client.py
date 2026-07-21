@@ -96,6 +96,7 @@ class ButtrbaseClient:
         retry_base_delay: float = 0.5,
         client_id: str = "",
         client_secret: str = "",
+        session: Optional[requests.Session] = None,
     ) -> None:
         """Create a client.
 
