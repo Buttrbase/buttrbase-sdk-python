@@ -21,7 +21,11 @@ from buttrbase import ButtrbaseClient
 # (see "App Authentication" below). Construct with client_id/client_secret
 # and the SDK fetches + refreshes the access token for you. End-user flows
 # can start from an anonymous client and let login() stash the user token.
-client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
+# For public flow (login, register), use a public client:
+client = ButtrbaseClient.new_public(client_id="<client-id>")
+
+# Or for admin features, use an authenticated client:
+# client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
 
 # Login — app_uuid is required (the UUID for your app on ButtrBase)
 resp = client.login(
@@ -772,7 +776,7 @@ print(home["tenancy_mode"], home["home_region"], home["home_base_url"])
 ```python
 from buttrbase import ButtrbaseClient
 
-client = ButtrbaseClient(client_id="<client-id>", client_secret="<client-secret>")
+client = ButtrbaseClient.new_public(client_id="<client-id>")
 APP_UUID = "018f1234-5678-7000-8000-000000000001"
 
 # 1. Register and login

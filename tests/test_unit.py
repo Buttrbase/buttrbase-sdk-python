@@ -44,6 +44,25 @@ def _make_client(access_token: str = "test-key") -> ButtrbaseClient:
 # ---------------------------------------------------------------------------
 
 class TestButtrbaseError:
+    def test_repr(self):
+        err = ButtrbaseError("oops", status_code=500, code="ERR", detail="bad")
+        assert repr(err) == "ButtrbaseError(status_code=500, code='ERR', detail='bad')"
+
+
+class TestClientInit:
+    def test_new_public(self):
+        client = ButtrbaseClient.new_public("public-client-id")
+        assert client.client_id == "public-client-id"
+        assert client.client_secret == ""
+        assert client.base_url == "https://stagingapi.buttrbase.com"
+
+    def test_new_public_with_kwargs(self):
+        client = ButtrbaseClient.new_public("pub-id", base_url="http://localhost:8000", timeout=2.5)
+        assert client.client_id == "pub-id"
+        assert client.client_secret == ""
+        assert client.base_url == "http://localhost:8000"
+        assert client.timeout == 2.5
+
     def test_default_attrs(self):
         err = ButtrbaseError("bad")
         assert str(err) == "bad"
@@ -403,16 +422,17 @@ class TestMagicLinkEndpoints:
     def test_send_magic_link_minimal(self):
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(200, {"sent": True})
-            result = self.client.send_magic_link("user@example.com")
+            result = self.client.send_magic_link("user@example.com", "app-123")
         assert result == {"sent": True}
         sent = mock_req.call_args[1]["json"]
-        assert sent == {"email": "user@example.com"}
+        assert sent == {"email": "user@example.com", "app_uuid": "app-123"}
 
     def test_send_magic_link_with_org_and_redirect(self):
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(200, {"sent": True})
             self.client.send_magic_link(
                 "user@example.com",
+                "app-123",
                 org_uuid="org-uuid-123",
                 redirect_to="https://example.com/dashboard",
             )
@@ -424,7 +444,7 @@ class TestMagicLinkEndpoints:
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(400, {"message": "bad email"})
             with pytest.raises(ButtrbaseError):
-                self.client.send_magic_link("not-an-email")
+                self.client.send_magic_link("not-an-email", "app-123")
 
     def test_verify_magic_link_ok(self):
         with self._patch() as mock_req:
@@ -1085,7 +1105,7 @@ class TestContactEndpoints:
             mock_req.return_value = _make_response(
                 200, {"message": "received", "reference_id": "ref-1"}
             )
-            result = self.client.post_contact("Alice", "alice@example.com", "Hello")
+            result = self.client.post_contact("Alice", "alice@example.com", "Hello", "app-123")
         assert result["reference_id"] == "ref-1"
         sent = mock_req.call_args[1]["json"]
         assert "company" not in sent
@@ -1098,17 +1118,17 @@ class TestContactEndpoints:
             )
             self.client.post_contact(
                 "Alice", "alice@example.com", "Hello",
-                company="Acme", app_id="app-123"
+                "app-123", company="Acme"
             )
         sent = mock_req.call_args[1]["json"]
         assert sent["company"] == "Acme"
-        assert sent["app_id"] == "app-123"
+        assert sent["app_uuid"] == "app-123"
 
     def test_post_contact_error(self):
         with self._patch() as mock_req:
             mock_req.return_value = _make_response(400, {"message": "bad request"})
             with pytest.raises(ButtrbaseError):
-                self.client.post_contact("", "", "")
+                self.client.post_contact("", "", "", "app-123")
 
     def test_post_contact_us_ok(self):
         with self._patch() as mock_req:

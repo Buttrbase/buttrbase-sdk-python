@@ -87,6 +87,11 @@ _MAX_BACKOFF = 4.0
 class ButtrbaseClient:
     """Small synchronous client for the ButtrBase API."""
 
+    @classmethod
+    def new_public(cls, client_id: str, base_url: str = DEFAULT_BASE_URL, **kwargs: Any) -> "ButtrbaseClient":
+        """Create a secret-less client for public flows."""
+        return cls(client_id=client_id, client_secret="", base_url=base_url, **kwargs)
+
     def __init__(
         self,
         access_token: str = "",
@@ -301,8 +306,8 @@ class ButtrbaseClient:
     def send_magic_link(
         self,
         email: str,
+        app_uuid: str,
         *,
-        app_uuid: Optional[str] = None,
         redirect_to: Optional[str] = None,
         org_uuid: Optional[str] = None,
     ) -> dict:
@@ -338,9 +343,7 @@ class ButtrbaseClient:
             "expires_in_seconds": int}``. ``dev_token`` is the raw one-time
             token, returned only in non-prod dev-echo mode (``None`` in prod).
         """
-        payload: dict = {"email": email}
-        if app_uuid is not None:
-            payload["app_uuid"] = app_uuid
+        payload: dict = {"email": email, "app_uuid": app_uuid}
         if redirect_to is not None:
             payload["redirect_to"] = redirect_to
         if org_uuid is not None:
@@ -604,19 +607,17 @@ class ButtrbaseClient:
         name: str,
         email: str,
         message: str,
+        app_uuid: str,
         company: Optional[str] = None,
-        app_id: Optional[str] = None,
     ) -> ContactSubmitResponse:
         """POST /api/contact — submit an account / sales enquiry form.
 
         Returns:
             A ``ContactSubmitResponse`` dict with ``message`` and ``reference_id``.
         """
-        payload: dict = {"name": name, "email": email, "message": message}
+        payload: dict = {"name": name, "email": email, "message": message, "app_uuid": app_uuid}
         if company is not None:
             payload["company"] = company
-        if app_id is not None:
-            payload["app_id"] = app_id
         return self._request("POST", "/api/contact", json=payload, auth=False)
 
     def post_contact_us(
@@ -1776,15 +1777,13 @@ class ButtrbaseClient:
         self,
         phone: str,
         message: str,
+        app_uuid: str,
         scheme: Optional[str] = None,
-        app_uuid: Optional[str] = None,
     ) -> dict:
         """POST /api/sms/send_sms."""
-        payload: dict = {"phone": phone, "message": message}
+        payload: dict = {"phone": phone, "message": message, "app_uuid": app_uuid}
         if scheme is not None:
             payload["scheme"] = scheme
-        if app_uuid is not None:
-            payload["app_uuid"] = app_uuid
         return self._request("POST", "/api/sms/send_sms", json=payload)
 
     # ----- Email -----
@@ -1874,15 +1873,13 @@ class ButtrbaseClient:
         name: str,
         email: str,
         message: str,
+        app_uuid: str,
         company: Optional[str] = None,
-        app_id: Optional[str] = None,
     ) -> ContactSubmitResponse:
         """POST /api/contact."""
-        payload: dict = {"name": name, "email": email, "message": message}
+        payload: dict = {"name": name, "email": email, "message": message, "app_uuid": app_uuid}
         if company is not None:
             payload["company"] = company
-        if app_id is not None:
-            payload["app_id"] = app_id
         return self._request("POST", "/api/contact", json=payload, auth=False)
 
     def post_contact_us(
