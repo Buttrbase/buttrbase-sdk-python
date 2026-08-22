@@ -187,7 +187,7 @@ client.report_usage({
 })
 ```
 
-## JWKS-backed RS256 Verifier
+## JWKS-backed RS256 Verifier (with HS256 fallback)
 
 *Added in 0.6.0 — feature parity with the Rust SDK `Verifier`. Requires
 `PyJWT[crypto]`.*
@@ -200,6 +200,8 @@ Use `Verifier` when you need to **cryptographically verify** token signatures
 against buttrbase's public JWKS endpoint (i.e. in any server-side middleware
 that accepts user tokens from browsers or API clients).  The JWKS is cached
 internally by `PyJWKClient`; the cache is refreshed on key-miss.
+
+**HS256 Fallback**: If the provided token uses the `HS256` algorithm instead of `RS256`, the `Verifier` automatically falls back to a network introspection request against the issuer's `/api/auth/introspect` endpoint. If you have an `INTROSPECTION_API_KEY` environment variable set, it will be automatically passed in the `X-Introspection-Key` header. This allows seamless hybrid verification of both locally-verifiable (RS256) and network-verifiable (HS256) tokens.
 
 ```python
 from buttrbase import Verifier, VerifierError

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — HS256 Network Introspection Fallback for Verifier
+
+### Added
+
+- **`Verifier.verify_token` and `Verifier.verify_bearer`** now support hybrid token verification. If the provided JWT uses the `HS256` algorithm, the verifier will fall back to a network introspection request against the issuer's `/api/auth/introspect` endpoint, rather than failing JWKS signature validation.
+- Setting the `INTROSPECTION_API_KEY` environment variable will automatically pass its value in the `X-Introspection-Key` header during introspection. This allows the SDK to transparently verify both RS256 (local JWKS) and HS256 (network introspection) tokens.
+
 ## 0.7.0 — Rust SDK feature parity (wallet, subscriptions, app-management, entitlements)
 
 Additive release closing all hard-missing method gaps and resolving shape/naming

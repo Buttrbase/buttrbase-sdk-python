@@ -263,6 +263,8 @@ class Verifier:
         Signature validation uses the JWKS endpoint supplied at construction.
         The JWKS is fetched lazily and cached by :class:`~jwt.PyJWKClient`.
         A cache-miss triggers one automatic refresh.
+        If the token uses the HS256 algorithm, it falls back to a network
+        introspection request against the issuer's /api/auth/introspect endpoint.
 
         Args:
             token: A bare JWT string (without the ``Bearer `` prefix).
@@ -276,6 +278,51 @@ class Verifier:
                 the issuer does not match, the token is expired, or the ``kid``
                 is not found in the JWKS.
         """
+        try:
+            unverified_header = self._jwt.get_unverified_header(token)
+            alg = unverified_header.get("alg")
+        except self._jwt.DecodeError as exc:
+            raise VerifierError(f"Malformed token: {exc}") from exc
+
+        if alg == "HS256":
+            import os
+            import requests
+
+            base_url = self._issuer.rstrip("/")
+            url = f"{base_url}/api/auth/introspect"
+            introspection_key = os.environ.get("INTROSPECTION_API_KEY", "")
+            headers = {
+                "X-Introspection-Key": introspection_key,
+                "Content-Type": "application/json"
+            }
+            try:
+                resp = requests.post(url, json={"token": token}, headers=headers)
+                resp.raise_for_status()
+            except requests.RequestException as exc:
+                raise VerifierError(f"Introspection request failed: {exc}") from exc
+            
+            data = resp.json()
+            if not data.get("active"):
+                raise VerifierError("Token is inactive")
+            
+            resp_data = data.get("data")
+            claims_data = None
+            sub = ""
+            org = ""
+            if isinstance(resp_data, dict):
+                claims_data = ClaimsData.from_dict(resp_data)
+                sub = str(resp_data.get("user_uuid", ""))
+                org = str(resp_data.get("org_uuid", ""))
+                
+            return Claims(
+                sub=sub,
+                org=org,
+                exp=int(data.get("exp", 0)),
+                iat=0,
+                scope=[],
+                data=claims_data,
+            )
+
         try:
             signing_key = self._jwks_client.get_signing_key_from_jwt(token)
         except Exception as exc:

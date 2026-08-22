@@ -88,7 +88,7 @@ class ButtrbaseClient:
     """Small synchronous client for the ButtrBase API."""
 
     @classmethod
-    def new_public(cls, client_id: str, base_url: str = DEFAULT_BASE_URL, **kwargs: Any) -> "ButtrbaseClient":
+    def new_public(cls, client_id: str = "bb_live_public", base_url: str = DEFAULT_BASE_URL, **kwargs: Any) -> "ButtrbaseClient":
         """Create a secret-less client for public flows."""
         return cls(client_id=client_id, client_secret="", base_url=base_url, **kwargs)
 
@@ -99,7 +99,7 @@ class ButtrbaseClient:
         timeout: float = 10.0,
         max_retries: int = 3,
         retry_base_delay: float = 0.5,
-        client_id: str = "",
+        client_id: str = "bb_live_public",
         client_secret: str = "",
         session: Optional[requests.Session] = None,
     ) -> None:
