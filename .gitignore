@@ -9,3 +9,9 @@ build/
 venv/
 .coverage
 htmlcov/
+target/
+.DS_Store
+node_modules/
+*.dylib
+*.so
+.env
